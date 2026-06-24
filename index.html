@@ -19,6 +19,9 @@
     --text:#152033; --text-secondary:#5B6B82; --text-tertiary:#94A3B8;
     --navy:#0F2A4A; --navy-light:#1E3A5F;
     --accent:#0E7C8C; --accent-light:#E3F4F6; --accent-dark:#0A5E6B;
+    --coral:#E8623D; --coral-light:#FCE6DE;
+    --amber:#E8A23D; --amber-light:#FCEFDA;
+    --violet:#7C5CBF; --violet-light:#EEE7F8;
     --docs:#9A6400; --docs-bg:#FCEFD4;
     --progress:#1D5FB0; --progress-bg:#E2EDFB;
     --filed:#107A4D; --filed-bg:#DDF3E8;
@@ -82,18 +85,38 @@
   .btn-cancel{background:var(--bg);color:var(--text-secondary);border:1px solid var(--border) !important;}
   .btn-save{background:var(--accent);color:#fff;}
   .config-warning{margin:40px 16px;background:var(--query-bg);color:var(--query);font-size:13px;padding:16px;border-radius:10px;line-height:1.5;}
+  .tab-bar{display:flex;gap:8px;padding:14px 16px 0;background:var(--bg);}
+  .tab-btn{flex:1;height:40px;border-radius:11px 11px 0 0;border:none;background:transparent;color:var(--text-secondary);font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;}
+  .tab-btn.active{background:var(--card);color:var(--navy);box-shadow:0 -2px 8px rgba(15,42,74,0.06);}
+  .tab-btn.active#tab-filed{color:var(--filed);}
+  .sum-chip.c-coral.active{border-color:var(--coral);background:var(--coral-light);}
+  .sum-chip.c-coral.active .n{color:var(--coral);}
+  .sum-chip.c-amber.active{border-color:var(--amber);background:var(--amber-light);}
+  .sum-chip.c-amber.active .n{color:var(--amber);}
+  .sum-chip.c-violet.active{border-color:var(--violet);background:var(--violet-light);}
+  .sum-chip.c-violet.active .n{color:var(--violet);}
+  .sum-chip.c-filed.active{border-color:var(--filed);background:var(--filed-bg);}
+  .sum-chip.c-filed.active .n{color:var(--filed);}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="topbar">
-    <h1>Pending works — Individuals</h1>
+    <h1>GSN Work Status</h1>
     <div class="sub" id="header-sub">Connecting...</div>
     <div class="sync-status"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Connecting...</span></div>
   </div>
   <div id="install-banner" style="display:none;background:var(--accent-light);color:var(--accent-dark);font-size:12.5px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
     <span>Install this app on your phone for quicker access</span>
     <button id="install-btn" style="background:var(--accent);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;flex-shrink:0;">Install</button>
+  </div>
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-pending" data-tab="pending">
+      <i class="ti ti-clock" style="font-size:15px"></i> Pending
+    </button>
+    <button class="tab-btn" id="tab-filed" data-tab="filed">
+      <i class="ti ti-check" style="font-size:15px"></i> Filed
+    </button>
   </div>
   <div class="summary-row" id="summary-row"></div>
   <div class="controls">
@@ -121,16 +144,8 @@ const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF");
 let supabaseClient = null;
 let DATA = [];
 
-const STATUS_META = {
-  "Docs Awaited": {cls:"docs"}, "In Progress": {cls:"progress"},
-  "Filed": {cls:"filed"}, "Query Raised": {cls:"query"}
-};
-const STATUS_ORDER = ["Docs Awaited","In Progress","Query Raised","Filed"];
-
+let currentTab = 'pending';
 let activeFilter = null, searchTerm = "", staffFilter = "";
-
-function fmtDate(d){ if(!d) return "No due date"; const dt=new Date(d+"T00:00:00"); return dt.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
-function isOverdue(d, status){ if(!d || status === "Filed") return false; return new Date(d+"T00:00:00") < new Date(new Date().toDateString()); }
 
 function showConfigWarning(){
   document.getElementById('header-sub').textContent = "Not connected yet";
@@ -148,7 +163,7 @@ async function loadData(){
   const { data, error } = await supabaseClient
     .from('individual_returns')
     .select('*')
-    .order('due_date', { ascending: true, nullsFirst: false });
+    .order('particulars', { ascending: true });
   if(error){
     document.getElementById('sync-text').textContent = "Connection error";
     document.getElementById('sync-dot').classList.add('error');
@@ -163,24 +178,29 @@ async function loadData(){
 }
 
 function renderSummary(){
-  const counts = {}; STATUS_ORDER.forEach(s => counts[s] = 0);
-  DATA.forEach(d => counts[d.status] = (counts[d.status]||0)+1);
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const withStaff = {};
+  tabData.forEach(d => { const s = d.done_by || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
+  const topStaff = Object.entries(withStaff).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const colorClasses = ['c-coral','c-amber','c-violet'];
+
   const row = document.getElementById('summary-row');
   row.innerHTML = `
-    <div class="sum-chip ${activeFilter===null?'active':''}" data-status="">
-      <div class="n">${DATA.length}</div><div class="l">All</div>
+    <div class="sum-chip ${activeFilter===null?'active':''}" data-staff="">
+      <div class="n">${tabData.length}</div><div class="l">All</div>
     </div>
-    ${STATUS_ORDER.map(s => `
-      <div class="sum-chip ${activeFilter===s?'active':''}" data-status="${s}">
-        <div class="n">${counts[s]}</div><div class="l">${s}</div>
+    ${topStaff.map(([staff,count],i) => `
+      <div class="sum-chip ${colorClasses[i % colorClasses.length]} ${activeFilter===staff?'active':''}" data-staff="${staff}">
+        <div class="n">${count}</div><div class="l">${staff}</div>
       </div>`).join('')}`;
   row.querySelectorAll('.sum-chip').forEach(chip => {
-    chip.addEventListener('click', () => { activeFilter = chip.dataset.status || null; renderAll(); });
+    chip.addEventListener('click', () => { activeFilter = chip.dataset.staff || null; renderAll(); });
   });
 }
 
 function renderStaffOptions(){
-  const staffSet = [...new Set(DATA.map(d=>d.assigned_staff).filter(Boolean))].sort();
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const staffSet = [...new Set(tabData.map(d=>d.done_by).filter(Boolean))].sort();
   const sel = document.getElementById('staff-filter');
   const current = sel.value;
   sel.innerHTML = `<option value="">All staff</option>` + staffSet.map(s=>`<option value="${s}">${s}</option>`).join('');
@@ -188,47 +208,47 @@ function renderStaffOptions(){
 }
 
 function renderList(){
-  let items = DATA.slice();
-  if(activeFilter) items = items.filter(d=>d.status===activeFilter);
-  if(staffFilter) items = items.filter(d=>d.assigned_staff===staffFilter);
-  if(searchTerm) items = items.filter(d=>d.client_name.toLowerCase().includes(searchTerm.toLowerCase()));
+  let items = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  if(activeFilter) items = items.filter(d => (d.done_by || 'Unassigned') === activeFilter);
+  if(staffFilter) items = items.filter(d=>d.done_by===staffFilter);
+  if(searchTerm) items = items.filter(d=>d.particulars.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const list = document.getElementById('list');
   if(items.length === 0){
-    list.innerHTML = `<div class="empty">No matching pending works</div>`;
+    list.innerHTML = `<div class="empty">${currentTab === 'filed' ? 'No filed returns yet' : 'No matching pending works'}</div>`;
     return;
   }
   list.innerHTML = items.map(d => {
-    const meta = STATUS_META[d.status];
-    const overdue = isOverdue(d.due_date, d.status);
+    const stripeClass = d.filed ? 's-filed' : 's-docs';
     return `
-    <div class="work-card s-${meta.cls}">
+    <div class="work-card ${stripeClass}">
       <div class="work-top">
         <div>
-          <div class="work-name">${d.client_name}</div>
+          <div class="work-name">${d.particulars}</div>
           <div class="work-meta">
-            <span><i class="ti ti-user" style="font-size:13px"></i>${d.assigned_staff||'Unassigned'}</span>
-            <span style="${overdue?'color:var(--query);font-weight:500':''}"><i class="ti ti-calendar" style="font-size:13px"></i>${fmtDate(d.due_date)}${overdue?' (overdue)':''}</span>
+            <span><i class="ti ti-user" style="font-size:13px"></i>${d.done_by||'Unassigned'}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
           </div>
         </div>
-        <span class="badge ${meta.cls}">${d.status}</span>
+        <span class="badge ${d.filed ? 'filed' : 'docs'}">${d.filed ? 'Filed' : 'Pending'}</span>
       </div>
+      ${d.documents_awaited ? `<div class="work-remarks"><strong>Docs awaited:</strong> ${d.documents_awaited}</div>` : ''}
       ${d.remarks ? `<div class="work-remarks">${d.remarks}</div>` : ''}
       <div class="work-actions">
-        <select onchange="quickStatusChange('${d.id}', this.value)">
-          ${STATUS_ORDER.map(s=>`<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join('')}
-        </select>
+        <button class="work-actions-toggle" onclick="quickFiledToggle('${d.id}', ${!d.filed})" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:${d.filed ? 'var(--bg)' : 'var(--filed-bg)'};color:${d.filed ? 'var(--text-secondary)' : 'var(--filed)'};font-weight:600;">
+          ${d.filed ? 'Mark as pending' : 'Mark as filed'}
+        </button>
         <button class="edit-btn" aria-label="Edit" onclick="openSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
       </div>
     </div>`;
   }).join('');
 }
 
-async function quickStatusChange(id, newStatus){
+async function quickFiledToggle(id, newFiledValue){
   document.getElementById('sync-text').textContent = "Saving...";
   const { error } = await supabaseClient
     .from('individual_returns')
-    .update({ status: newStatus, last_updated_by: 'Mobile app' })
+    .update({ filed: newFiledValue, last_updated_by: 'Mobile app' })
     .eq('id', id);
   if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
 }
@@ -238,9 +258,22 @@ function renderAll(){ renderSummary(); renderStaffOptions(); renderList(); }
 document.getElementById('search-input').addEventListener('input', e => { searchTerm = e.target.value; renderList(); });
 document.getElementById('staff-filter').addEventListener('change', e => { staffFilter = e.target.value; renderList(); });
 
+document.getElementById('tab-pending').addEventListener('click', () => {
+  currentTab = 'pending'; activeFilter = null; staffFilter = "";
+  document.getElementById('tab-pending').classList.add('active');
+  document.getElementById('tab-filed').classList.remove('active');
+  renderAll();
+});
+document.getElementById('tab-filed').addEventListener('click', () => {
+  currentTab = 'filed'; activeFilter = null; staffFilter = "";
+  document.getElementById('tab-filed').classList.add('active');
+  document.getElementById('tab-pending').classList.remove('active');
+  renderAll();
+});
+
 function openSheet(id){
   const isNew = id === null;
-  const item = isNew ? {client_name:"",assigned_staff:"",status:"Docs Awaited",due_date:"",remarks:""} : DATA.find(d=>d.id===id);
+  const item = isNew ? {particulars:"",done_by:"",work_status:"",documents_awaited:"",remarks:"",filed:false} : DATA.find(d=>d.id===id);
 
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
@@ -248,30 +281,63 @@ function openSheet(id){
     <div class="sheet">
       <div class="sheet-handle"></div>
       <h2>${isNew ? 'Add pending work' : 'Edit pending work'}</h2>
-      <div class="field"><label>Client name</label><input type="text" id="f-name" value="${item.client_name}"></div>
-      <div class="field"><label>Assigned staff</label><input type="text" id="f-staff" value="${item.assigned_staff||''}"></div>
-      <div class="field"><label>Status</label>
-        <select id="f-status">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===item.status?'selected':''}>${s}</option>`).join('')}</select>
+      <div class="field"><label>Particulars (client name)</label><input type="text" id="f-particulars" value="${item.particulars}"></div>
+      <div class="field"><label>Done by</label><input type="text" id="f-doneby" value="${item.done_by||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="f-workstatus" placeholder="e.g. need to verify" value="${item.work_status||''}"></div>
+      <div class="field"><label>Documents awaited</label><textarea id="f-docsawaited">${item.documents_awaited||''}</textarea></div>
+      <div class="field"><label>Other remarks</label><textarea id="f-remarks">${item.remarks||''}</textarea></div>
+      <div class="field" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="f-filed" ${item.filed ? 'checked' : ''} style="width:20px;height:20px;">
+        <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
       </div>
-      <div class="field"><label>Due date</label><input type="date" id="f-date" value="${item.due_date||''}"></div>
-      <div class="field"><label>Remarks</label><textarea id="f-remarks">${item.remarks||''}</textarea></div>
       <div class="sheet-actions">
         <button class="btn-cancel" id="sheet-cancel">Cancel</button>
         <button class="btn-save" id="sheet-save">Save</button>
       </div>
+      ${!isNew ? `<button id="sheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
     </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
   document.getElementById('sheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('sheet-delete').onclick = () => {
+      const confirmOverlay = document.createElement('div');
+      confirmOverlay.className = 'sheet-overlay';
+      confirmOverlay.style.zIndex = '60';
+      confirmOverlay.innerHTML = `
+        <div class="sheet" style="padding-bottom:18px;">
+          <div class="sheet-handle"></div>
+          <h2>Delete "${item.particulars}"?</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">This removes it permanently from the tracker and the shared Excel file. This cannot be undone.</p>
+          <div class="sheet-actions">
+            <button class="btn-cancel" id="confirm-cancel">Cancel</button>
+            <button id="confirm-delete" style="flex:1;height:44px;border-radius:11px;font-size:14px;font-weight:600;border:none;background:var(--query);color:#fff;">Delete</button>
+          </div>
+        </div>`;
+      document.body.appendChild(confirmOverlay);
+      confirmOverlay.addEventListener('click', e => { if(e.target === confirmOverlay) confirmOverlay.remove(); });
+      document.getElementById('confirm-cancel').onclick = () => confirmOverlay.remove();
+      document.getElementById('confirm-delete').onclick = async () => {
+        document.getElementById('sync-text').textContent = "Deleting...";
+        const { error } = await supabaseClient.from('individual_returns').delete().eq('id', item.id);
+        if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+        confirmOverlay.remove();
+        overlay.remove();
+      };
+    };
+  }
+
   document.getElementById('sheet-save').onclick = async () => {
-    const name = document.getElementById('f-name').value.trim();
+    const name = document.getElementById('f-particulars').value.trim();
     if(!name) return;
     const updated = {
-      client_name: name,
-      assigned_staff: document.getElementById('f-staff').value.trim() || null,
-      status: document.getElementById('f-status').value,
-      due_date: document.getElementById('f-date').value || null,
+      particulars: name,
+      done_by: document.getElementById('f-doneby').value.trim() || null,
+      work_status: document.getElementById('f-workstatus').value.trim() || null,
+      documents_awaited: document.getElementById('f-docsawaited').value.trim() || null,
       remarks: document.getElementById('f-remarks').value.trim() || null,
+      filed: document.getElementById('f-filed').checked,
       last_updated_by: 'Mobile app'
     };
     document.getElementById('sync-text').textContent = "Saving...";
