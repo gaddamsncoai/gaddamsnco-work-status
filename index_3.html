@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Pending Works Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0F2A4A">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PendingWorks">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#EEF1F5; --card:#FFFFFF; --border:#DDE3EA; --border-strong:#B8C4D1;
+    --text:#152033; --text-secondary:#5B6B82; --text-tertiary:#94A3B8;
+    --navy:#0F2A4A; --navy-light:#1E3A5F;
+    --accent:#0E7C8C; --accent-light:#E3F4F6; --accent-dark:#0A5E6B;
+    --coral:#E8623D; --coral-light:#FCE6DE;
+    --amber:#E8A23D; --amber-light:#FCEFDA;
+    --violet:#7C5CBF; --violet-light:#EEE7F8;
+    --docs:#9A6400; --docs-bg:#FCEFD4;
+    --progress:#1D5FB0; --progress-bg:#E2EDFB;
+    --filed:#107A4D; --filed-bg:#DDF3E8;
+    --query:#B83D5C; --query-bg:#FBE5EB;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  body{background:var(--bg);color:var(--text);min-height:100vh;}
+  .app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+  .topbar{padding:22px 18px 18px;background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%);position:sticky;top:0;z-index:10;box-shadow:0 4px 16px rgba(15,42,74,0.18);}
+  .topbar h1{font-size:18.5px;font-weight:600;letter-spacing:-0.2px;color:#fff;}
+  .topbar .sub{font-size:12.5px;color:rgba(255,255,255,0.68);margin-top:3px;}
+  .sync-status{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(255,255,255,0.78);margin-top:10px;}
+  .sync-dot{width:6px;height:6px;border-radius:50%;background:#3DDC97;box-shadow:0 0 0 3px rgba(61,220,151,0.25);}
+  .sync-dot.error{background:#F2667D;box-shadow:0 0 0 3px rgba(242,102,125,0.25);}
+  .summary-row{display:flex;flex-wrap:wrap;gap:6px;padding:16px 16px 4px;}
+  .sum-chip{flex:1;min-width:60px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 6px;text-align:center;cursor:pointer;transition:all .15s;}
+  .sum-chip.active{border-color:var(--accent);background:var(--accent-light);box-shadow:0 1px 0 var(--accent) inset;}
+  .sum-chip .n{font-size:17px;font-weight:700;line-height:1.1;color:var(--navy);}
+  .sum-chip.active .n{color:var(--accent-dark);}
+  .sum-chip .l{font-size:9.5px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;}
+  .controls{padding:12px 16px 8px;display:flex;gap:8px;}
+  .search-box{flex:1;position:relative;}
+  .search-box input{width:100%;height:40px;border:1px solid var(--border);border-radius:11px;padding:0 12px 0 36px;font-size:14px;background:var(--card);color:var(--text);}
+  .search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  .search-box i{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--text-tertiary);}
+  select.staff-filter{height:40px;border:1px solid var(--border);border-radius:11px;background:var(--card);color:var(--text);font-size:13px;padding:0 8px;max-width:112px;}
+  .list{flex:1;padding:6px 16px 90px;display:flex;flex-direction:column;gap:9px;}
+  .empty{text-align:center;padding:60px 20px;color:var(--text-tertiary);font-size:13.5px;}
+  .work-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;box-shadow:0 1px 3px rgba(15,42,74,0.05);position:relative;overflow:hidden;}
+  .work-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--stripe,var(--border-strong));}
+  .work-card.s-docs::before{background:var(--docs);}
+  .work-card.s-progress::before{background:var(--progress);}
+  .work-card.s-filed::before{background:var(--filed);}
+  .work-card.s-query::before{background:var(--query);}
+  .work-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .work-name{font-size:14.5px;font-weight:600;line-height:1.3;color:var(--navy);}
+  .work-meta{font-size:12px;color:var(--text-secondary);margin-top:3px;display:flex;gap:9px;flex-wrap:wrap;}
+  .work-meta span{display:inline-flex;align-items:center;gap:3px;}
+  .badge{font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:7px;white-space:nowrap;flex-shrink:0;letter-spacing:0.1px;}
+  .badge.docs{background:var(--docs-bg);color:var(--docs);}
+  .badge.progress{background:var(--progress-bg);color:var(--progress);}
+  .badge.filed{background:var(--filed-bg);color:var(--filed);}
+  .badge.query{background:var(--query-bg);color:var(--query);}
+  .work-remarks{font-size:12.5px;color:var(--text-secondary);margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);font-style:italic;}
+  .work-actions{display:flex;gap:6px;margin-top:11px;}
+  .work-actions select{flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--text);padding:0 6px;}
+  .work-actions button.edit-btn{height:33px;width:33px;border:1px solid var(--border);border-radius:9px;background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--accent-dark);flex-shrink:0;}
+  .fab{position:fixed;bottom:20px;left:50%;transform:translateX(190px);width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,var(--accent) 0%,var(--accent-dark) 100%);color:#fff;border:none;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 14px rgba(14,124,140,0.4);cursor:pointer;}
+  @media (max-width:520px){.fab{left:auto;right:20px;transform:none;}}
+  .sheet-overlay{position:fixed;inset:0;background:rgba(15,32,51,0.45);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .sheet{background:var(--card);width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:18px 16px 24px;max-height:85vh;overflow-y:auto;}
+  .sheet-handle{width:36px;height:4px;background:var(--border-strong);border-radius:2px;margin:0 auto 14px;}
+  .sheet h2{font-size:16px;font-weight:600;margin-bottom:14px;color:var(--navy);}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--text-secondary);margin-bottom:5px;font-weight:500;}
+  .field input,.field select,.field textarea{width:100%;height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);}
+  .field textarea{height:64px;padding:8px 12px;resize:none;font-family:inherit;}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  .sheet-actions{display:flex;gap:8px;margin-top:6px;}
+  .sheet-actions button{flex:1;height:44px;border-radius:11px;font-size:14px;font-weight:600;border:none;}
+  .btn-cancel{background:var(--bg);color:var(--text-secondary);border:1px solid var(--border) !important;}
+  .btn-save{background:var(--accent);color:#fff;}
+  .config-warning{margin:40px 16px;background:var(--query-bg);color:var(--query);font-size:13px;padding:16px;border-radius:10px;line-height:1.5;}
+  .tab-bar{display:flex;gap:8px;padding:14px 16px 0;background:var(--bg);}
+  .tab-btn{flex:1;height:40px;border-radius:11px 11px 0 0;border:none;background:transparent;color:var(--text-secondary);font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;}
+  .tab-btn.active{background:var(--card);color:var(--navy);box-shadow:0 -2px 8px rgba(15,42,74,0.06);}
+  .tab-btn.active#tab-filed{color:var(--filed);}
+  .sum-chip.c-coral.active{border-color:var(--coral);background:var(--coral-light);}
+  .sum-chip.c-coral.active .n{color:var(--coral);}
+  .sum-chip.c-amber.active{border-color:var(--amber);background:var(--amber-light);}
+  .sum-chip.c-amber.active .n{color:var(--amber);}
+  .sum-chip.c-violet.active{border-color:var(--violet);background:var(--violet-light);}
+  .sum-chip.c-violet.active .n{color:var(--violet);}
+  .sum-chip.c-filed.active{border-color:var(--filed);background:var(--filed-bg);}
+  .sum-chip.c-filed.active .n{color:var(--filed);}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>GSN Work Status</h1>
+    <div class="sub" id="header-sub">Connecting...</div>
+    <div class="sync-status"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Connecting...</span></div>
+  </div>
+  <div id="install-banner" style="display:none;background:var(--accent-light);color:var(--accent-dark);font-size:12.5px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+    <span>Install this app on your phone for quicker access</span>
+    <button id="install-btn" style="background:var(--accent);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;flex-shrink:0;">Install</button>
+  </div>
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-pending" data-tab="pending">
+      <i class="ti ti-clock" style="font-size:15px"></i> Pending
+    </button>
+    <button class="tab-btn" id="tab-filed" data-tab="filed">
+      <i class="ti ti-check" style="font-size:15px"></i> Filed
+    </button>
+  </div>
+  <div class="summary-row" id="summary-row"></div>
+  <div class="controls">
+    <div class="search-box">
+      <i class="ti ti-search"></i>
+      <input type="text" id="search-input" placeholder="Search client name">
+    </div>
+    <select class="staff-filter" id="staff-filter"><option value="">All staff</option></select>
+  </div>
+  <div class="list" id="list"></div>
+  <button class="fab" id="add-btn" aria-label="Add new pending work"><i class="ti ti-plus"></i></button>
+</div>
+
+<script>
+// ============================================================
+// CONNECTION SETTINGS -- fill these in once your Supabase
+// project is ready. Use the "anon" / "public" key here, NOT
+// the service_role key (that one stays only in the sync script).
+// ============================================================
+const SUPABASE_URL = "https://dknvlqnuvjpfxkcvpyay.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_zP6oo3eaOqLavFolpKAjGA_jxKMVDJ4";
+// ============================================================
+
+const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF");
+let supabaseClient = null;
+let DATA = [];
+
+let currentTab = 'pending';
+let activeFilter = null, searchTerm = "", staffFilter = "";
+
+function showConfigWarning(){
+  document.getElementById('header-sub').textContent = "Not connected yet";
+  document.getElementById('sync-text').textContent = "Not configured";
+  document.getElementById('sync-dot').classList.add('error');
+  document.getElementById('list').innerHTML = `<div class="config-warning">
+    <strong>This app isn't connected to your Supabase project yet.</strong><br><br>
+    Open this file and fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code>
+    near the top of the script with your real project details, then reload.
+  </div>`;
+  document.getElementById('add-btn').style.display = 'none';
+}
+
+async function loadData(){
+  const { data, error } = await supabaseClient
+    .from('individual_returns')
+    .select('*');
+  if(error){
+    document.getElementById('sync-text').textContent = "Connection error";
+    document.getElementById('sync-dot').classList.add('error');
+    console.error(error);
+    return;
+  }
+  // Sort case-insensitively (trim + lowercase) so this matches the office
+  // tracker's own alphabetical sort exactly, rather than relying on
+  // Supabase/Postgres's default text ordering which can differ on case.
+  DATA = (data || []).slice().sort((a, b) =>
+    (a.particulars || '').trim().toLowerCase().localeCompare((b.particulars || '').trim().toLowerCase())
+  );
+  document.getElementById('sync-dot').classList.remove('error');
+  document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+  document.getElementById('header-sub').textContent = "Connected to your office data";
+  renderAll();
+}
+
+function normalizeStaffName(name){
+  // Different entry points (this app, the office tracker, the old Excel
+  // sync) can save the same staff member's name with different
+  // capitalisation or stray spaces - e.g. "MOUNIKA" vs "Mounika ". Without
+  // this, each variant gets counted as a separate person in the summary
+  // boxes, the staff dropdown, and filtering. This only affects how names
+  // are GROUPED/DISPLAYED here - it never rewrites what's actually stored
+  // in Supabase.
+  if(!name) return '';
+  return name.trim().replace(/\s+/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderSummary(){
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const withStaff = {};
+  tabData.forEach(d => { const s = normalizeStaffName(d.done_by) || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
+  // Show every staff member with at least one item, not just the top 3 -
+  // still sorted so the busiest staff appear first.
+  const allStaff = Object.entries(withStaff).sort((a,b)=>b[1]-a[1]);
+  const colorClasses = ['c-coral','c-amber','c-violet'];
+
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `
+    <div class="sum-chip ${activeFilter===null?'active':''}" data-staff="">
+      <div class="n">${tabData.length}</div><div class="l">All</div>
+    </div>
+    ${allStaff.map(([staff,count],i) => `
+      <div class="sum-chip ${colorClasses[i % colorClasses.length]} ${activeFilter===staff?'active':''}" data-staff="${staff}">
+        <div class="n">${count}</div><div class="l">${staff}</div>
+      </div>`).join('')}`;
+  row.querySelectorAll('.sum-chip').forEach(chip => {
+    chip.addEventListener('click', () => { activeFilter = chip.dataset.staff || null; renderAll(); });
+  });
+}
+
+function renderStaffOptions(){
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const staffSet = [...new Set(tabData.map(d=>normalizeStaffName(d.done_by)).filter(Boolean))].sort();
+  const sel = document.getElementById('staff-filter');
+  const current = sel.value;
+  sel.innerHTML = `<option value="">All staff</option>` + staffSet.map(s=>`<option value="${s}">${s}</option>`).join('');
+  sel.value = current;
+}
+
+function renderList(){
+  let items = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  if(activeFilter) items = items.filter(d => (normalizeStaffName(d.done_by) || 'Unassigned') === activeFilter);
+  if(staffFilter) items = items.filter(d=>normalizeStaffName(d.done_by)===staffFilter);
+  if(searchTerm) items = items.filter(d=>d.particulars.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">${currentTab === 'filed' ? 'No filed returns yet' : 'No matching pending works'}</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => {
+    const stripeClass = d.filed ? 's-filed' : 's-docs';
+    return `
+    <div class="work-card ${stripeClass}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${d.filed ? 'filed' : 'docs'}">${d.filed ? 'Filed' : 'Pending'}</span>
+      </div>
+      ${d.documents_awaited ? `<div class="work-remarks"><strong>Docs awaited:</strong> ${d.documents_awaited}</div>` : ''}
+      ${d.remarks ? `<div class="work-remarks">${d.remarks}</div>` : ''}
+      <div class="work-actions">
+        <button class="work-actions-toggle" onclick="quickFiledToggle('${d.id}', ${!d.filed})" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:${d.filed ? 'var(--bg)' : 'var(--filed-bg)'};color:${d.filed ? 'var(--text-secondary)' : 'var(--filed)'};font-weight:600;">
+          ${d.filed ? 'Mark as pending' : 'Mark as filed'}
+        </button>
+        <button class="edit-btn" aria-label="Edit" onclick="openSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function quickFiledToggle(id, newFiledValue){
+  document.getElementById('sync-text').textContent = "Saving...";
+  const { error } = await supabaseClient
+    .from('individual_returns')
+    .update({ filed: newFiledValue, last_updated_by: 'Mobile app' })
+    .eq('id', id);
+  if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+}
+
+function renderAll(){ renderSummary(); renderStaffOptions(); renderList(); }
+
+document.getElementById('search-input').addEventListener('input', e => { searchTerm = e.target.value; renderList(); });
+document.getElementById('staff-filter').addEventListener('change', e => { staffFilter = e.target.value; renderList(); });
+
+document.getElementById('tab-pending').addEventListener('click', () => {
+  currentTab = 'pending'; activeFilter = null; staffFilter = "";
+  document.getElementById('tab-pending').classList.add('active');
+  document.getElementById('tab-filed').classList.remove('active');
+  renderAll();
+});
+document.getElementById('tab-filed').addEventListener('click', () => {
+  currentTab = 'filed'; activeFilter = null; staffFilter = "";
+  document.getElementById('tab-filed').classList.add('active');
+  document.getElementById('tab-pending').classList.remove('active');
+  renderAll();
+});
+
+function openSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:"",done_by:"",work_status:"",documents_awaited:"",remarks:"",filed:false} : DATA.find(d=>d.id===id);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew ? 'Add pending work' : 'Edit pending work'}</h2>
+      <div class="field"><label>Particulars (client name)</label><input type="text" id="f-particulars" value="${item.particulars}"></div>
+      <div class="field"><label>Done by</label><input type="text" id="f-doneby" value="${item.done_by||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="f-workstatus" placeholder="e.g. need to verify" value="${item.work_status||''}"></div>
+      <div class="field"><label>Documents awaited</label><textarea id="f-docsawaited">${item.documents_awaited||''}</textarea></div>
+      <div class="field"><label>Other remarks</label><textarea id="f-remarks">${item.remarks||''}</textarea></div>
+      <div class="field" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="f-filed" ${item.filed ? 'checked' : ''} style="width:20px;height:20px;">
+        <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="sheet-cancel">Cancel</button>
+        <button class="btn-save" id="sheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="sheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('sheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('sheet-delete').onclick = () => {
+      const confirmOverlay = document.createElement('div');
+      confirmOverlay.className = 'sheet-overlay';
+      confirmOverlay.style.zIndex = '60';
+      confirmOverlay.innerHTML = `
+        <div class="sheet" style="padding-bottom:18px;">
+          <div class="sheet-handle"></div>
+          <h2>Delete "${item.particulars}"?</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">This removes it permanently from the tracker and the shared Excel file. This cannot be undone.</p>
+          <div class="sheet-actions">
+            <button class="btn-cancel" id="confirm-cancel">Cancel</button>
+            <button id="confirm-delete" style="flex:1;height:44px;border-radius:11px;font-size:14px;font-weight:600;border:none;background:var(--query);color:#fff;">Delete</button>
+          </div>
+        </div>`;
+      document.body.appendChild(confirmOverlay);
+      confirmOverlay.addEventListener('click', e => { if(e.target === confirmOverlay) confirmOverlay.remove(); });
+      document.getElementById('confirm-cancel').onclick = () => confirmOverlay.remove();
+      document.getElementById('confirm-delete').onclick = async () => {
+        document.getElementById('sync-text').textContent = "Deleting...";
+        const { error } = await supabaseClient.from('individual_returns').delete().eq('id', item.id);
+        if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+        // Update the list immediately rather than waiting for the realtime
+        // subscription to notice - if realtime isn't enabled on this table,
+        // the deleted card would otherwise keep showing until next reload,
+        // which looks exactly like "delete doesn't work".
+        DATA = DATA.filter(d => d.id !== item.id);
+        document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+        confirmOverlay.remove();
+        overlay.remove();
+        renderAll();
+      };
+    };
+  }
+
+  document.getElementById('sheet-save').onclick = async () => {
+    const name = document.getElementById('f-particulars').value.trim();
+    if(!name) return;
+    const updated = {
+      particulars: name,
+      done_by: document.getElementById('f-doneby').value.trim() || null,
+      work_status: document.getElementById('f-workstatus').value.trim() || null,
+      documents_awaited: document.getElementById('f-docsawaited').value.trim() || null,
+      remarks: document.getElementById('f-remarks').value.trim() || null,
+      filed: document.getElementById('f-filed').checked,
+      last_updated_by: 'Mobile app'
+    };
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      updated.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from('individual_returns').insert(updated));
+    } else {
+      ({ error } = await supabaseClient.from('individual_returns').update(updated).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadData(); // refresh immediately rather than waiting on the realtime subscription
+  };
+}
+
+document.getElementById('add-btn').addEventListener('click', () => openSheet(null));
+
+function subscribeToLiveUpdates(){
+  supabaseClient
+    .channel('individual_returns_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'individual_returns' }, () => {
+      loadData();
+    })
+    .subscribe();
+}
+
+if(isConfigured){
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  loadData();
+  subscribeToLiveUpdates();
+} else {
+  showConfigWarning();
+}
+
+// ============================================================
+// PWA install support
+// ============================================================
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(err => console.log('Service worker registration failed:', err));
+}
+
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById('install-banner').style.display = 'flex';
+});
+
+document.getElementById('install-btn').addEventListener('click', async () => {
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if(outcome === 'accepted'){
+    document.getElementById('install-banner').style.display = 'none';
+  }
+  deferredInstallPrompt = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner').style.display = 'none';
+});
+</script>
+</body>
+</html>
