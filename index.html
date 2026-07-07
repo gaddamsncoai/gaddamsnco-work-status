@@ -159,28 +159,51 @@ function showConfigWarning(){
   document.getElementById('add-btn').style.display = 'none';
 }
 
+function trackerRowOrder(d){
+  // The office tracker (serve.py) shows rows in the order they were
+  // created there (row id order), and gives each one an excel_row_id like
+  // "ca-33" where 33 IS that row's id - so sorting by that same number
+  // reproduces the tracker's own order exactly, instead of alphabetical,
+  // which made it hard to compare the two side by side. Anything without
+  // a "ca-" id (e.g. a client added straight from the phone, not yet in
+  // the tracker) sorts to the very end rather than being mixed in.
+  const m = /^ca-(\d+)$/.exec(d.excel_row_id || '');
+  return m ? parseInt(m[1], 10) : Infinity;
+}
+
 async function loadData(){
   const { data, error } = await supabaseClient
     .from('individual_returns')
-    .select('*')
-    .order('particulars', { ascending: true });
+    .select('*');
   if(error){
     document.getElementById('sync-text').textContent = "Connection error";
     document.getElementById('sync-dot').classList.add('error');
     console.error(error);
     return;
   }
-  DATA = data;
+  DATA = (data || []).slice().sort((a, b) => trackerRowOrder(a) - trackerRowOrder(b));
   document.getElementById('sync-dot').classList.remove('error');
   document.getElementById('sync-text').textContent = "Live — synced with office Excel";
   document.getElementById('header-sub').textContent = "Connected to your office data";
   renderAll();
 }
 
+function normalizeStaffName(name){
+  // Different entry points (this app, the office tracker, the old Excel
+  // sync) can save the same staff member's name with different
+  // capitalisation or stray spaces - e.g. "MOUNIKA" vs "Mounika ". Without
+  // this, each variant gets counted as a separate person in the summary
+  // boxes, the staff dropdown, and filtering. This only affects how names
+  // are GROUPED/DISPLAYED here - it never rewrites what's actually stored
+  // in Supabase.
+  if(!name) return '';
+  return name.trim().replace(/\s+/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function renderSummary(){
   const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
   const withStaff = {};
-  tabData.forEach(d => { const s = d.done_by || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
+  tabData.forEach(d => { const s = normalizeStaffName(d.done_by) || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
   // Show every staff member with at least one item, not just the top 3 -
   // still sorted so the busiest staff appear first.
   const allStaff = Object.entries(withStaff).sort((a,b)=>b[1]-a[1]);
@@ -202,7 +225,7 @@ function renderSummary(){
 
 function renderStaffOptions(){
   const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
-  const staffSet = [...new Set(tabData.map(d=>d.done_by).filter(Boolean))].sort();
+  const staffSet = [...new Set(tabData.map(d=>normalizeStaffName(d.done_by)).filter(Boolean))].sort();
   const sel = document.getElementById('staff-filter');
   const current = sel.value;
   sel.innerHTML = `<option value="">All staff</option>` + staffSet.map(s=>`<option value="${s}">${s}</option>`).join('');
@@ -211,8 +234,8 @@ function renderStaffOptions(){
 
 function renderList(){
   let items = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
-  if(activeFilter) items = items.filter(d => (d.done_by || 'Unassigned') === activeFilter);
-  if(staffFilter) items = items.filter(d=>d.done_by===staffFilter);
+  if(activeFilter) items = items.filter(d => (normalizeStaffName(d.done_by) || 'Unassigned') === activeFilter);
+  if(staffFilter) items = items.filter(d=>normalizeStaffName(d.done_by)===staffFilter);
   if(searchTerm) items = items.filter(d=>d.particulars.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const list = document.getElementById('list');
@@ -228,7 +251,7 @@ function renderList(){
         <div>
           <div class="work-name">${d.particulars}</div>
           <div class="work-meta">
-            <span><i class="ti ti-user" style="font-size:13px"></i>${d.done_by||'Unassigned'}</span>
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
           </div>
         </div>
