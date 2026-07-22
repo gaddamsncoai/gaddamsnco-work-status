@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>GSNCO Work Status</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0F2A4A">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GSNCO Work Status">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#EEF1F5; --card:#FFFFFF; --border:#DDE3EA; --border-strong:#B8C4D1;
+    --text:#152033; --text-secondary:#5B6B82; --text-tertiary:#94A3B8;
+    --navy:#0F2A4A; --navy-light:#1E3A5F;
+    --accent:#0E7C8C; --accent-light:#E3F4F6; --accent-dark:#0A5E6B;
+    --coral:#E8623D; --coral-light:#FCE6DE;
+    --amber:#E8A23D; --amber-light:#FCEFDA;
+    --violet:#7C5CBF; --violet-light:#EEE7F8;
+    --docs:#9A6400; --docs-bg:#FCEFD4;
+    --progress:#1D5FB0; --progress-bg:#E2EDFB;
+    --filed:#107A4D; --filed-bg:#DDF3E8;
+    --query:#B83D5C; --query-bg:#FBE5EB;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  body{background:var(--bg);color:var(--text);min-height:100vh;}
+  .app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+  .topbar{padding:22px 18px 18px;background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%);position:sticky;top:0;z-index:10;box-shadow:0 4px 16px rgba(15,42,74,0.18);}
+  .topbar h1{font-size:18.5px;font-weight:600;letter-spacing:-0.2px;color:#fff;}
+  .topbar .sub{font-size:12.5px;color:rgba(255,255,255,0.68);margin-top:3px;}
+  .sync-status{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(255,255,255,0.78);margin-top:10px;}
+  .sync-dot{width:6px;height:6px;border-radius:50%;background:#3DDC97;box-shadow:0 0 0 3px rgba(61,220,151,0.25);}
+  .sync-dot.error{background:#F2667D;box-shadow:0 0 0 3px rgba(242,102,125,0.25);}
+  .summary-row{display:flex;flex-wrap:wrap;gap:6px;padding:16px 16px 4px;}
+  .sum-chip{flex:1;min-width:60px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 6px;text-align:center;cursor:pointer;transition:all .15s;}
+  .sum-chip.active{border-color:var(--accent);background:var(--accent-light);box-shadow:0 1px 0 var(--accent) inset;}
+  .sum-chip .n{font-size:17px;font-weight:700;line-height:1.1;color:var(--navy);}
+  .sum-chip.active .n{color:var(--accent-dark);}
+  .sum-chip .l{font-size:9.5px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;}
+  .controls{padding:12px 16px 8px;display:flex;gap:8px;}
+  .search-box{flex:1;position:relative;}
+  .search-box input{width:100%;height:40px;border:1px solid var(--border);border-radius:11px;padding:0 12px 0 36px;font-size:14px;background:var(--card);color:var(--text);}
+  .search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  .search-box i{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--text-tertiary);}
+  select.staff-filter{height:40px;border:1px solid var(--border);border-radius:11px;background:var(--card);color:var(--text);font-size:13px;padding:0 8px;max-width:112px;}
+  .list{flex:1;padding:6px 16px 90px;display:flex;flex-direction:column;gap:9px;}
+  .empty{text-align:center;padding:60px 20px;color:var(--text-tertiary);font-size:13.5px;}
+  .work-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;box-shadow:0 1px 3px rgba(15,42,74,0.05);position:relative;overflow:hidden;}
+  .work-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--stripe,var(--border-strong));}
+  .work-card.s-docs::before{background:var(--docs);}
+  .work-card.s-progress::before{background:var(--progress);}
+  .work-card.s-filed::before{background:var(--filed);}
+  .work-card.s-query::before{background:var(--query);}
+  .work-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .work-name{font-size:14.5px;font-weight:600;line-height:1.3;color:var(--navy);}
+  .work-meta{font-size:12px;color:var(--text-secondary);margin-top:3px;display:flex;gap:9px;flex-wrap:wrap;}
+  .work-meta span{display:inline-flex;align-items:center;gap:3px;}
+  .badge{font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:7px;white-space:nowrap;flex-shrink:0;letter-spacing:0.1px;}
+  .badge.docs{background:var(--docs-bg);color:var(--docs);}
+  .badge.progress{background:var(--progress-bg);color:var(--progress);}
+  .badge.filed{background:var(--filed-bg);color:var(--filed);}
+  .badge.query{background:var(--query-bg);color:var(--query);}
+  .work-remarks{font-size:12.5px;color:var(--text-secondary);margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);font-style:italic;}
+  .work-actions{display:flex;gap:6px;margin-top:11px;}
+  .work-actions select{flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--text);padding:0 6px;}
+  .work-actions button.edit-btn{height:33px;width:33px;border:1px solid var(--border);border-radius:9px;background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--accent-dark);flex-shrink:0;}
+  .fab{position:fixed;bottom:20px;left:50%;transform:translateX(190px);width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,var(--accent) 0%,var(--accent-dark) 100%);color:#fff;border:none;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 14px rgba(14,124,140,0.4);cursor:pointer;}
+  @media (max-width:520px){.fab{left:auto;right:20px;transform:none;}}
+  .sheet-overlay{position:fixed;inset:0;background:rgba(15,32,51,0.45);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .sheet{background:var(--card);width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:18px 16px 24px;max-height:85vh;overflow-y:auto;}
+  .sheet-handle{width:36px;height:4px;background:var(--border-strong);border-radius:2px;margin:0 auto 14px;}
+  .sheet h2{font-size:16px;font-weight:600;margin-bottom:14px;color:var(--navy);}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--text-secondary);margin-bottom:5px;font-weight:500;}
+  .field input,.field select,.field textarea{width:100%;height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;background:var(--bg);color:var(--text);}
+  .field textarea{height:64px;padding:8px 12px;resize:none;font-family:inherit;}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  .sheet-actions{display:flex;gap:8px;margin-top:6px;}
+  .sheet-actions button{flex:1;height:44px;border-radius:11px;font-size:14px;font-weight:600;border:none;}
+  .btn-cancel{background:var(--bg);color:var(--text-secondary);border:1px solid var(--border) !important;}
+  .btn-save{background:var(--accent);color:#fff;}
+  .config-warning{margin:40px 16px;background:var(--query-bg);color:var(--query);font-size:13px;padding:16px;border-radius:10px;line-height:1.5;}
+  .tab-bar{display:flex;gap:6px;padding:14px 16px 0;background:var(--bg);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .tab-bar::-webkit-scrollbar{display:none;}
+  .tab-btn{flex:0 0 auto;height:40px;padding:0 13px;border-radius:11px 11px 0 0;border:none;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;white-space:nowrap;}
+  .tab-btn.active{background:var(--card);color:var(--navy);box-shadow:0 -2px 8px rgba(15,42,74,0.06);}
+  .tab-btn.active#tab-filed{color:var(--filed);}
+  .sum-chip.c-coral.active{border-color:var(--coral);background:var(--coral-light);}
+  .sum-chip.c-coral.active .n{color:var(--coral);}
+  .sum-chip.c-amber.active{border-color:var(--amber);background:var(--amber-light);}
+  .sum-chip.c-amber.active .n{color:var(--amber);}
+  .sum-chip.c-violet.active{border-color:var(--violet);background:var(--violet-light);}
+  .sum-chip.c-violet.active .n{color:var(--violet);}
+  .sum-chip.c-filed.active{border-color:var(--filed);background:var(--filed-bg);}
+  .sum-chip.c-filed.active .n{color:var(--filed);}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>GSNCO Work Status</h1>
+    <div class="sub" id="header-sub">Connecting...</div>
+    <div class="sync-status"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Connecting...</span></div>
+  </div>
+  <div id="install-banner" style="display:none;background:var(--accent-light);color:var(--accent-dark);font-size:12.5px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+    <span>Install this app on your phone for quicker access</span>
+    <button id="install-btn" style="background:var(--accent);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;flex-shrink:0;">Install</button>
+  </div>
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-pending" data-tab="pending">
+      <i class="ti ti-clock" style="font-size:15px"></i> Pending
+    </button>
+    <button class="tab-btn" id="tab-filed" data-tab="filed">
+      <i class="ti ti-check" style="font-size:15px"></i> Filed
+    </button>
+    <button class="tab-btn" id="tab-intake" data-tab="intake">
+      <i class="ti ti-clipboard-list" style="font-size:15px"></i> Tax Audits list
+    </button>
+    <button class="tab-btn" id="tab-audits" data-tab="audits">
+      <i class="ti ti-report" style="font-size:15px"></i> Audits
+    </button>
+    <button class="tab-btn" id="tab-tds" data-tab="tds">
+      <i class="ti ti-receipt" style="font-size:15px"></i> TDS Returns
+    </button>
+    <button class="tab-btn" id="tab-roc" data-tab="roc">
+      <i class="ti ti-building" style="font-size:15px"></i> ROC
+    </button>
+    <button class="tab-btn" id="tab-special" data-tab="special">
+      <i class="ti ti-stars" style="font-size:15px"></i> Special Works
+    </button>
+  </div>
+  <div class="summary-row" id="summary-row"></div>
+  <div class="controls">
+    <div class="search-box">
+      <i class="ti ti-search"></i>
+      <input type="text" id="search-input" placeholder="Search client name">
+    </div>
+    <select class="staff-filter" id="staff-filter"><option value="">All staff</option></select>
+  </div>
+  <div class="list" id="list"></div>
+  <button class="fab" id="add-btn" aria-label="Add new pending work"><i class="ti ti-plus"></i></button>
+</div>
+
+<script>
+// ============================================================
+// CONNECTION SETTINGS -- fill these in once your Supabase
+// project is ready. Use the "anon" / "public" key here, NOT
+// the service_role key (that one stays only in the sync script).
+// ============================================================
+const SUPABASE_URL = "https://dknvlqnuvjpfxkcvpyay.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_zP6oo3eaOqLavFolpKAjGA_jxKMVDJ4";
+// ============================================================
+
+const isConfigured = !SUPABASE_URL.includes("YOUR-PROJECT-REF");
+let supabaseClient = null;
+let DATA = [];
+// Audit Intake is a separate screening checklist (client name + whether
+// their audit data has been received yet) - a completely different shape
+// from the Pending/Filed individual_returns rows above, stored in its own
+// Supabase table. See serve.py's audit_intake sheet for the office side.
+let AUDIT_DATA = [];
+
+// ------------------------------------------------------------------
+// Second sync expansion, 2026-07-21: Audits (Income Tax Audit + GSTR-9 +
+// GSTR-9C), TDS Returns (Q1-Q4), ROC, and Special Works. Each mirrors the
+// Audit Intake pattern above - its own Supabase table(s), loaded
+// independently, rendered with its own small set of functions. Filing
+// Particulars is NOT synced anywhere in this app (by explicit instruction) -
+// only the working Pending/Filed-type lists ever reach here, and TDS's
+// government portal login/password columns (which live only in the office
+// tracker's Filing Particulars sheet) never leave the office at all.
+// See serve.py's SUPABASE_SYNC_CONFIG for the office side of each of these.
+// ------------------------------------------------------------------
+let TAX_AUDITS_DATA = [];   // office tracker's "audits" (Income Tax Audit) sheet
+let GST_DATA = [];          // GSTR-9 AND GSTR-9C rows together, told apart by .form
+let TDS_DATA = [];          // all 4 quarters together, told apart by .quarter
+let ROC_DATA = [];
+let SPECIAL_WORKS_DATA = [];
+
+let auditsSubTab = 'itr';   // 'itr' | 'gstr9' | 'gstr9c' - which form is showing on the Audits tab
+let tdsQuarter = 'Q1';      // 'Q1'..'Q4' - which quarter is showing on the TDS Returns tab
+
+function byParticulars(a, b){
+  return (a.particulars || '').trim().toLowerCase().localeCompare((b.particulars || '').trim().toLowerCase());
+}
+
+// Mirrors serve.py's is_audit_status_done(): exact-word "done"/"filed"
+// match only, so in-progress notes like "not done yet" or "still wip" are
+// never mistaken for complete - same false-positive guard as the office
+// tracker uses for its own auto-move logic.
+function isDoneWord(v){
+  const s = (v || '').trim().toLowerCase();
+  return s === 'done' || s === 'filed';
+}
+
+let currentTab = 'pending';
+let activeFilter = null, searchTerm = "", staffFilter = "";
+
+function showConfigWarning(){
+  document.getElementById('header-sub').textContent = "Not connected yet";
+  document.getElementById('sync-text').textContent = "Not configured";
+  document.getElementById('sync-dot').classList.add('error');
+  document.getElementById('list').innerHTML = `<div class="config-warning">
+    <strong>This app isn't connected to your Supabase project yet.</strong><br><br>
+    Open this file and fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code>
+    near the top of the script with your real project details, then reload.
+  </div>`;
+  document.getElementById('add-btn').style.display = 'none';
+}
+
+async function loadData(){
+  const { data, error } = await supabaseClient
+    .from('individual_returns')
+    .select('*');
+  if(error){
+    document.getElementById('sync-text').textContent = "Connection error";
+    document.getElementById('sync-dot').classList.add('error');
+    console.error(error);
+    return;
+  }
+  // Sort case-insensitively (trim + lowercase) so this matches the office
+  // tracker's own alphabetical sort exactly, rather than relying on
+  // Supabase/Postgres's default text ordering which can differ on case.
+  DATA = (data || []).slice().sort((a, b) =>
+    (a.particulars || '').trim().toLowerCase().localeCompare((b.particulars || '').trim().toLowerCase())
+  );
+  document.getElementById('sync-dot').classList.remove('error');
+  document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+  document.getElementById('header-sub').textContent = "Connected to your office data";
+  renderAll();
+}
+
+async function loadAuditIntake(){
+  const { data, error } = await supabaseClient
+    .from('audit_intake')
+    .select('*');
+  if(error){ console.error(error); return; }
+  // Once a client is marked "data received", the office tracker
+  // automatically moves them into the main Audits sheet - so this
+  // screening checklist should only keep showing the ones still awaited.
+  AUDIT_DATA = (data || [])
+    .filter(d => !d.data_received)
+    .slice()
+    .sort((a, b) => (a.particulars || '').trim().toLowerCase().localeCompare((b.particulars || '').trim().toLowerCase()));
+  if(currentTab === 'intake') renderAll();
+}
+
+async function loadTaxAudits(){
+  const { data, error } = await supabaseClient.from('tax_audits').select('*');
+  if(error){ console.error(error); return; }
+  TAX_AUDITS_DATA = (data || []).slice().sort(byParticulars);
+  if(currentTab === 'audits') renderAll();
+}
+
+async function loadGstAudits(){
+  const { data, error } = await supabaseClient.from('gst_audits').select('*');
+  if(error){ console.error(error); return; }
+  GST_DATA = (data || []).slice().sort(byParticulars);
+  if(currentTab === 'audits') renderAll();
+}
+
+async function loadTdsReturns(){
+  const { data, error } = await supabaseClient.from('tds_returns').select('*');
+  if(error){ console.error(error); return; }
+  TDS_DATA = (data || []).slice().sort(byParticulars);
+  if(currentTab === 'tds') renderAll();
+}
+
+async function loadRoc(){
+  const { data, error } = await supabaseClient.from('roc_filings').select('*');
+  if(error){ console.error(error); return; }
+  ROC_DATA = (data || []).slice().sort(byParticulars);
+  if(currentTab === 'roc') renderAll();
+}
+
+async function loadSpecialWorks(){
+  const { data, error } = await supabaseClient.from('special_works').select('*');
+  if(error){ console.error(error); return; }
+  SPECIAL_WORKS_DATA = (data || []).slice().sort(byParticulars);
+  if(currentTab === 'special') renderAll();
+}
+
+function normalizeStaffName(name){
+  // Different entry points (this app, the office tracker, the old Excel
+  // sync) can save the same staff member's name with different
+  // capitalisation or stray spaces - e.g. "MOUNIKA" vs "Mounika ". Without
+  // this, each variant gets counted as a separate person in the summary
+  // boxes, the staff dropdown, and filtering. This only affects how names
+  // are GROUPED/DISPLAYED here - it never rewrites what's actually stored
+  // in Supabase.
+  if(!name) return '';
+  return name.trim().replace(/\s+/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderSummary(){
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const withStaff = {};
+  tabData.forEach(d => { const s = normalizeStaffName(d.done_by) || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
+  // Show every staff member with at least one item, not just the top 3 -
+  // still sorted so the busiest staff appear first.
+  const allStaff = Object.entries(withStaff).sort((a,b)=>b[1]-a[1]);
+  const colorClasses = ['c-coral','c-amber','c-violet'];
+
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `
+    <div class="sum-chip ${activeFilter===null?'active':''}" data-staff="">
+      <div class="n">${tabData.length}</div><div class="l">All</div>
+    </div>
+    ${allStaff.map(([staff,count],i) => `
+      <div class="sum-chip ${colorClasses[i % colorClasses.length]} ${activeFilter===staff?'active':''}" data-staff="${staff}">
+        <div class="n">${count}</div><div class="l">${staff}</div>
+      </div>`).join('')}`;
+  row.querySelectorAll('.sum-chip').forEach(chip => {
+    chip.addEventListener('click', () => { activeFilter = chip.dataset.staff || null; renderAll(); });
+  });
+}
+
+function renderStaffOptions(){
+  const tabData = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  const staffSet = [...new Set(tabData.map(d=>normalizeStaffName(d.done_by)).filter(Boolean))].sort();
+  const sel = document.getElementById('staff-filter');
+  const current = sel.value;
+  sel.innerHTML = `<option value="">All staff</option>` + staffSet.map(s=>`<option value="${s}">${s}</option>`).join('');
+  sel.value = current;
+}
+
+function renderList(){
+  let items = DATA.filter(d => currentTab === 'filed' ? d.filed : !d.filed);
+  if(activeFilter) items = items.filter(d => (normalizeStaffName(d.done_by) || 'Unassigned') === activeFilter);
+  if(staffFilter) items = items.filter(d=>normalizeStaffName(d.done_by)===staffFilter);
+  if(searchTerm) items = items.filter(d=>d.particulars.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">${currentTab === 'filed' ? 'No filed returns yet' : 'No matching pending works'}</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => {
+    const stripeClass = d.filed ? 's-filed' : 's-docs';
+    return `
+    <div class="work-card ${stripeClass}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${d.filed ? 'filed' : 'docs'}">${d.filed ? 'Filed' : 'Pending'}</span>
+      </div>
+      ${d.documents_awaited ? `<div class="work-remarks"><strong>Docs awaited:</strong> ${d.documents_awaited}</div>` : ''}
+      ${d.remarks ? `<div class="work-remarks">${d.remarks}</div>` : ''}
+      <div class="work-actions">
+        <button class="work-actions-toggle" onclick="quickFiledToggle('${d.id}', ${!d.filed})" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:${d.filed ? 'var(--bg)' : 'var(--filed-bg)'};color:${d.filed ? 'var(--text-secondary)' : 'var(--filed)'};font-weight:600;">
+          ${d.filed ? 'Mark as pending' : 'Mark as filed'}
+        </button>
+        <button class="edit-btn" aria-label="Edit" onclick="openSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function quickFiledToggle(id, newFiledValue){
+  document.getElementById('sync-text').textContent = "Saving...";
+  const { error } = await supabaseClient
+    .from('individual_returns')
+    .update({ filed: newFiledValue, last_updated_by: 'Mobile app' })
+    .eq('id', id);
+  if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+}
+
+function renderIntakeSummary(){
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `
+    <div class="sum-chip active" data-staff="">
+      <div class="n">${AUDIT_DATA.length}</div><div class="l">Awaiting data</div>
+    </div>`;
+}
+
+function renderIntakeList(){
+  let items = AUDIT_DATA;
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No clients awaiting audit data — add one below, or check the office tracker if you expected to see someone here.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card s-docs">
+      <div class="work-top">
+        <div><div class="work-name">${d.particulars}</div></div>
+        <span class="badge docs">Awaited</span>
+      </div>
+      <div class="work-actions">
+        <button class="work-actions-toggle" onclick="quickReceivedToggle('${d.id}')" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:var(--filed-bg);color:var(--filed);font-weight:600;">
+          Mark data received
+        </button>
+        <button class="edit-btn" aria-label="Edit" onclick="openIntakeSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
+      </div>
+    </div>`).join('');
+}
+
+async function quickReceivedToggle(id){
+  document.getElementById('sync-text').textContent = "Saving...";
+  const { error } = await supabaseClient
+    .from('audit_intake')
+    .update({ data_received: true, last_updated_by: 'Mobile app' })
+    .eq('id', id);
+  if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+  // Once received, this client moves off the screening list (they'll show
+  // up in the office tracker's Audits sheet instead) - drop them locally
+  // right away rather than waiting for realtime/next reload.
+  AUDIT_DATA = AUDIT_DATA.filter(d => d.id !== id);
+  document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+  renderAll();
+}
+
+function openIntakeSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:""} : AUDIT_DATA.find(d=>d.id===id);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew ? 'Add client to audit intake' : 'Edit client name'}</h2>
+      <div class="field"><label>Name of audit client</label><input type="text" id="fi-particulars" value="${item.particulars}"></div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="isheet-cancel">Cancel</button>
+        <button class="btn-save" id="isheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="isheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Remove from list</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('isheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('isheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('audit_intake').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      AUDIT_DATA = AUDIT_DATA.filter(d => d.id !== item.id);
+      document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+      overlay.remove();
+      renderAll();
+    };
+  }
+
+  document.getElementById('isheet-save').onclick = async () => {
+    const name = document.getElementById('fi-particulars').value.trim();
+    if(!name) return;
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      ({ error } = await supabaseClient.from('audit_intake').insert({
+        excel_row_id: `app-${Date.now()}`,
+        particulars: name,
+        data_received: false,
+        last_updated_by: 'Mobile app',
+      }));
+    } else {
+      ({ error } = await supabaseClient.from('audit_intake').update({
+        particulars: name,
+        last_updated_by: 'Mobile app',
+      }).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadAuditIntake();
+  };
+}
+
+// ------------------------------------------------------------------
+// Audits tab: Income Tax Audit / GSTR-9 / GSTR-9C, picked via a
+// sub-selector shown where the staff summary chips normally go. Income Tax
+// Audit has 3 stages (mirrors the office tracker's 3-way Pending / 3CD
+// Filed,ITR Pending / Filed split); GSTR-9 and GSTR-9C each have 2
+// (Pending/Filed) - all computed client-side from the same raw fields the
+// office tracker itself uses, not a separate synced "stage" value.
+// ------------------------------------------------------------------
+
+function taxAuditStage(d){
+  const cd = isDoneWord(d.form_3cd_3cb), itr = isDoneWord(d.itr_filing_status);
+  if(cd && itr) return {label:'Filed', cls:'filed'};
+  if(cd) return {label:'3CD Filed, ITR Pending', cls:'progress'};
+  return {label:'Pending', cls:'docs'};
+}
+function gstStage(d){
+  return isDoneWord(d.work_status) ? {label:'Filed', cls:'filed'} : {label:'Pending', cls:'docs'};
+}
+
+function renderAuditsSubTabs(){
+  const subs = [
+    {key:'itr', label:'Income Tax Audit'},
+    {key:'gstr9', label:'GSTR-9'},
+    {key:'gstr9c', label:'GSTR-9C'},
+  ];
+  const row = document.getElementById('summary-row');
+  row.innerHTML = subs.map(s => `
+    <div class="sum-chip ${auditsSubTab===s.key?'active':''}" data-sub="${s.key}">
+      <div class="l" style="font-size:11.5px;font-weight:600;padding:3px 0;">${s.label}</div>
+    </div>`).join('');
+  row.querySelectorAll('.sum-chip').forEach(chip => {
+    chip.addEventListener('click', () => { auditsSubTab = chip.dataset.sub; renderAll(); });
+  });
+}
+
+function renderAuditsList(){
+  let items, stageFn;
+  if(auditsSubTab === 'itr'){ items = TAX_AUDITS_DATA; stageFn = taxAuditStage; }
+  else if(auditsSubTab === 'gstr9'){ items = GST_DATA.filter(d => d.form === 'GSTR-9'); stageFn = gstStage; }
+  else { items = GST_DATA.filter(d => d.form === 'GSTR-9C'); stageFn = gstStage; }
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No entries here yet — add one below.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => {
+    const stage = stageFn(d);
+    const doneBy = auditsSubTab === 'itr' ? d.audit_done_by : d.done_by;
+    return `
+    <div class="work-card s-${stage.cls}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(doneBy)||'Unassigned'}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${stage.cls}">${stage.label}</span>
+      </div>
+      <div class="work-actions">
+        <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openAuditSheet('${d.id}','${auditsSubTab}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openAuditSheet(id, sub){
+  const isNew = id === null;
+  const table = sub === 'itr' ? 'tax_audits' : 'gst_audits';
+  const title = sub === 'itr' ? 'Income Tax Audit' : (sub === 'gstr9' ? 'GSTR-9' : 'GSTR-9C');
+  let item;
+  if(sub === 'itr'){
+    item = isNew ? {particulars:'',audit_done_by:'',work_status:'',report_typing:'',gst:'',form_3cd_3cb:'',itr_filing_status:'',dsc:'',other_remarks:''} : TAX_AUDITS_DATA.find(d=>d.id===id);
+  } else {
+    item = isNew ? {particulars:'',done_by:'',work_status:''} : GST_DATA.find(d=>d.id===id);
+  }
+
+  const extraFields = sub === 'itr' ? `
+      <div class="field"><label>Audit report typing</label><input type="text" id="fa-report" value="${item.report_typing||''}"></div>
+      <div class="field"><label>GST</label><input type="text" id="fa-gst" value="${item.gst||''}"></div>
+      <div class="field"><label>3CB-3CD status</label><input type="text" id="fa-3cd" value="${item.form_3cd_3cb||''}"></div>
+      <div class="field"><label>ITR filing status</label><input type="text" id="fa-itr" value="${item.itr_filing_status||''}"></div>
+      <div class="field"><label>DSC</label><input type="text" id="fa-dsc" value="${item.dsc||''}"></div>
+      <div class="field"><label>Other remarks</label><textarea id="fa-remarks">${item.other_remarks||''}</textarea></div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} ${title} entry</h2>
+      <div class="field"><label>Particulars (client name)</label><input type="text" id="fa-particulars" value="${item.particulars||''}"></div>
+      <div class="field"><label>${sub==='itr'?'Audit done by':'Done by'}</label><input type="text" id="fa-doneby" value="${(sub==='itr'?item.audit_done_by:item.done_by)||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="fa-workstatus" value="${item.work_status||''}"></div>
+      ${extraFields}
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="asheet-cancel">Cancel</button>
+        <button class="btn-save" id="asheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="asheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('asheet-cancel').onclick = () => overlay.remove();
+
+  const reload = () => sub === 'itr' ? loadTaxAudits() : loadGstAudits();
+
+  if(!isNew){
+    document.getElementById('asheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from(table).delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await reload();
+    };
+  }
+
+  document.getElementById('asheet-save').onclick = async () => {
+    const name = document.getElementById('fa-particulars').value.trim();
+    if(!name) return;
+    const doneBy = document.getElementById('fa-doneby').value.trim() || null;
+    const payload = {
+      particulars: name,
+      work_status: document.getElementById('fa-workstatus').value.trim() || null,
+      last_updated_by: 'Mobile app',
+    };
+    if(sub === 'itr'){
+      payload.audit_done_by = doneBy;
+      payload.report_typing = document.getElementById('fa-report').value.trim() || null;
+      payload.gst = document.getElementById('fa-gst').value.trim() || null;
+      payload.form_3cd_3cb = document.getElementById('fa-3cd').value.trim() || null;
+      payload.itr_filing_status = document.getElementById('fa-itr').value.trim() || null;
+      payload.dsc = document.getElementById('fa-dsc').value.trim() || null;
+      payload.other_remarks = document.getElementById('fa-remarks').value.trim() || null;
+    } else {
+      payload.done_by = doneBy;
+      payload.form = title;
+    }
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from(table).insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from(table).update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await reload();
+  };
+}
+
+// ------------------------------------------------------------------
+// TDS Returns tab: quarter picked via a sub-selector (reusing the summary
+// chip row, like Audits above), Pending/Filed shown via the same simple
+// non-blank-FILED concept as the Pending/Filed tabs (not a keyword check).
+// ------------------------------------------------------------------
+
+function renderTdsQuarterTabs(){
+  const quarters = ['Q1','Q2','Q3','Q4'];
+  const row = document.getElementById('summary-row');
+  row.innerHTML = quarters.map(q => `
+    <div class="sum-chip ${tdsQuarter===q?'active':''}" data-q="${q}">
+      <div class="n">${TDS_DATA.filter(d=>d.quarter===q).length}</div><div class="l">${q}</div>
+    </div>`).join('');
+  row.querySelectorAll('.sum-chip').forEach(chip => {
+    chip.addEventListener('click', () => { tdsQuarter = chip.dataset.q; renderAll(); });
+  });
+}
+
+function renderTdsList(){
+  let items = TDS_DATA.filter(d => d.quarter === tdsQuarter);
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No ${tdsQuarter} entries yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card ${d.filed?'s-filed':'s-docs'}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
+            ${d.form_type ? `<span><i class="ti ti-file-text" style="font-size:13px"></i>${d.form_type}</span>` : ''}
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${d.filed?'filed':'docs'}">${d.filed?'Filed':'Pending'}</span>
+      </div>
+      <div class="work-actions">
+        <button class="work-actions-toggle" onclick="quickTdsFiledToggle('${d.id}', ${!d.filed})" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:${d.filed ? 'var(--bg)' : 'var(--filed-bg)'};color:${d.filed ? 'var(--text-secondary)' : 'var(--filed)'};font-weight:600;">
+          ${d.filed ? 'Mark as pending' : 'Mark as filed'}
+        </button>
+        <button class="edit-btn" aria-label="Edit" onclick="openTdsSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
+      </div>
+    </div>`).join('');
+}
+
+async function quickTdsFiledToggle(id, newVal){
+  document.getElementById('sync-text').textContent = "Saving...";
+  const { error } = await supabaseClient.from('tds_returns').update({ filed: newVal, last_updated_by: 'Mobile app' }).eq('id', id);
+  if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+  await loadTdsReturns();
+}
+
+function openTdsSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:'',form_type:'',work_status:'',done_by:'',filed:false} : TDS_DATA.find(d=>d.id===id);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} TDS ${tdsQuarter} entry</h2>
+      <div class="field"><label>Particulars (client name)</label><input type="text" id="ft-particulars" value="${item.particulars||''}"></div>
+      <div class="field"><label>Form (24Q/26Q)</label><input type="text" id="ft-formtype" value="${item.form_type||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="ft-workstatus" value="${item.work_status||''}"></div>
+      <div class="field"><label>Done by</label><input type="text" id="ft-doneby" value="${item.done_by||''}"></div>
+      <div class="field" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="ft-filed" ${item.filed?'checked':''} style="width:20px;height:20px;">
+        <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="tsheet-cancel">Cancel</button>
+        <button class="btn-save" id="tsheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="tsheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('tsheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('tsheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('tds_returns').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await loadTdsReturns();
+    };
+  }
+
+  document.getElementById('tsheet-save').onclick = async () => {
+    const name = document.getElementById('ft-particulars').value.trim();
+    if(!name) return;
+    const payload = {
+      particulars: name,
+      form_type: document.getElementById('ft-formtype').value.trim() || null,
+      work_status: document.getElementById('ft-workstatus').value.trim() || null,
+      done_by: document.getElementById('ft-doneby').value.trim() || null,
+      filed: document.getElementById('ft-filed').checked,
+      last_updated_by: 'Mobile app',
+    };
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      payload.quarter = tdsQuarter;
+      ({ error } = await supabaseClient.from('tds_returns').insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from('tds_returns').update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadTdsReturns();
+  };
+}
+
+// ------------------------------------------------------------------
+// ROC tab: single flat list, no pending/filed split - matches the office
+// tracker's "roc" sheet exactly.
+// ------------------------------------------------------------------
+
+function renderRocSummary(){
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `<div class="sum-chip active"><div class="n">${ROC_DATA.length}</div><div class="l">Companies</div></div>`;
+}
+
+function renderRocList(){
+  let items = ROC_DATA;
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No ROC entries yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card s-docs">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            ${d.filing_status_srn ? `<span><i class="ti ti-check" style="font-size:13px"></i>SRN ${d.filing_status_srn}</span>` : ''}
+            ${d.filing_status_date ? `<span><i class="ti ti-calendar" style="font-size:13px"></i>${d.filing_status_date}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="work-actions">
+        <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openRocSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
+      </div>
+    </div>`).join('');
+}
+
+function openRocSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:'',fs_sent_to_cs:'',roc_data_received:'',prints_taken:'',audit_report:'',data_verification:'',signs_of_client:'',signs_of_ca:'',sent_to_cs:'',filing_status_date:'',filing_status_srn:''} : ROC_DATA.find(d=>d.id===id);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} ROC company</h2>
+      <div class="field"><label>Name of company</label><input type="text" id="fr-particulars" value="${item.particulars||''}"></div>
+      <div class="field"><label>FS sent to company secretary</label><input type="text" id="fr-fs" value="${item.fs_sent_to_cs||''}"></div>
+      <div class="field"><label>ROC data received from CS</label><input type="text" id="fr-rocdata" value="${item.roc_data_received||''}"></div>
+      <div class="field"><label>Prints taken or not</label><input type="text" id="fr-prints" value="${item.prints_taken||''}"></div>
+      <div class="field"><label>Audit report</label><input type="text" id="fr-auditreport" value="${item.audit_report||''}"></div>
+      <div class="field"><label>Data verification</label><input type="text" id="fr-verify" value="${item.data_verification||''}"></div>
+      <div class="field"><label>Signs of client</label><input type="text" id="fr-sigclient" value="${item.signs_of_client||''}"></div>
+      <div class="field"><label>Signs of CA</label><input type="text" id="fr-sigca" value="${item.signs_of_ca||''}"></div>
+      <div class="field"><label>Sent to CS</label><input type="text" id="fr-senttocs" value="${item.sent_to_cs||''}"></div>
+      <div class="field"><label>Filing status - date</label><input type="text" id="fr-fdate" value="${item.filing_status_date||''}"></div>
+      <div class="field"><label>Filing status - SRN no</label><input type="text" id="fr-fsrn" value="${item.filing_status_srn||''}"></div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="rsheet-cancel">Cancel</button>
+        <button class="btn-save" id="rsheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="rsheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('rsheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('rsheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('roc_filings').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await loadRoc();
+    };
+  }
+
+  document.getElementById('rsheet-save').onclick = async () => {
+    const name = document.getElementById('fr-particulars').value.trim();
+    if(!name) return;
+    const g = id2 => document.getElementById(id2).value.trim() || null;
+    const payload = {
+      particulars: name,
+      fs_sent_to_cs: g('fr-fs'),
+      roc_data_received: g('fr-rocdata'),
+      prints_taken: g('fr-prints'),
+      audit_report: g('fr-auditreport'),
+      data_verification: g('fr-verify'),
+      signs_of_client: g('fr-sigclient'),
+      signs_of_ca: g('fr-sigca'),
+      sent_to_cs: g('fr-senttocs'),
+      filing_status_date: g('fr-fdate'),
+      filing_status_srn: g('fr-fsrn'),
+      last_updated_by: 'Mobile app',
+    };
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from('roc_filings').insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from('roc_filings').update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadRoc();
+  };
+}
+
+// ------------------------------------------------------------------
+// Special Works tab: single flat list, matches the office tracker's
+// reconfigured 4-field "special_works" sheet exactly.
+// ------------------------------------------------------------------
+
+function renderSpecialWorksSummary(){
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `<div class="sum-chip active"><div class="n">${SPECIAL_WORKS_DATA.length}</div><div class="l">All</div></div>`;
+}
+
+function renderSpecialWorksList(){
+  let items = SPECIAL_WORKS_DATA;
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No special works entries yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card s-docs">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${d.particulars}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+          </div>
+        </div>
+        ${d.fees_received_status ? `<span class="badge docs">${d.fees_received_status}</span>` : ''}
+      </div>
+      <div class="work-actions">
+        <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openSpecialWorkSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
+      </div>
+    </div>`).join('');
+}
+
+function openSpecialWorkSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:'',done_by:'',work_status:'',fees_received_status:''} : SPECIAL_WORKS_DATA.find(d=>d.id===id);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} special work</h2>
+      <div class="field"><label>Particulars</label><input type="text" id="fs-particulars" value="${item.particulars||''}"></div>
+      <div class="field"><label>Done by</label><input type="text" id="fs-doneby" value="${item.done_by||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="fs-workstatus" value="${item.work_status||''}"></div>
+      <div class="field"><label>Fees received status</label><input type="text" id="fs-fees" value="${item.fees_received_status||''}"></div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="swsheet-cancel">Cancel</button>
+        <button class="btn-save" id="swsheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="swsheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('swsheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('swsheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('special_works').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await loadSpecialWorks();
+    };
+  }
+
+  document.getElementById('swsheet-save').onclick = async () => {
+    const name = document.getElementById('fs-particulars').value.trim();
+    if(!name) return;
+    const payload = {
+      particulars: name,
+      done_by: document.getElementById('fs-doneby').value.trim() || null,
+      work_status: document.getElementById('fs-workstatus').value.trim() || null,
+      fees_received_status: document.getElementById('fs-fees').value.trim() || null,
+      last_updated_by: 'Mobile app',
+    };
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from('special_works').insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from('special_works').update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadSpecialWorks();
+  };
+}
+
+function renderAll(){
+  if(currentTab === 'intake'){
+    renderIntakeSummary();
+    renderIntakeList();
+  } else if(currentTab === 'audits'){
+    renderAuditsSubTabs();
+    renderAuditsList();
+  } else if(currentTab === 'tds'){
+    renderTdsQuarterTabs();
+    renderTdsList();
+  } else if(currentTab === 'roc'){
+    renderRocSummary();
+    renderRocList();
+  } else if(currentTab === 'special'){
+    renderSpecialWorksSummary();
+    renderSpecialWorksList();
+  } else {
+    renderSummary(); renderStaffOptions(); renderList();
+  }
+}
+
+document.getElementById('search-input').addEventListener('input', e => { searchTerm = e.target.value; renderList(); });
+document.getElementById('staff-filter').addEventListener('change', e => { staffFilter = e.target.value; renderList(); });
+
+function setActiveTabButton(tabId){
+  ['tab-pending','tab-filed','tab-intake','tab-audits','tab-tds','tab-roc','tab-special'].forEach(id => {
+    document.getElementById(id).classList.toggle('active', id === tabId);
+  });
+  // The staff dropdown only makes sense for the Pending/Filed lists - every
+  // other tab either has no "done by" concept (Tax Audits list, ROC) or
+  // uses its own sub-selector in that same space (Audits, TDS Returns), so
+  // hide it everywhere else to avoid confusion.
+  document.getElementById('staff-filter').style.display = (tabId === 'tab-pending' || tabId === 'tab-filed') ? '' : 'none';
+}
+
+function switchToTab(tabKey, tabBtnId){
+  currentTab = tabKey; activeFilter = null; staffFilter = ""; searchTerm = "";
+  document.getElementById('search-input').value = "";
+  setActiveTabButton(tabBtnId);
+  renderAll();
+}
+document.getElementById('tab-pending').addEventListener('click', () => switchToTab('pending', 'tab-pending'));
+document.getElementById('tab-filed').addEventListener('click', () => switchToTab('filed', 'tab-filed'));
+document.getElementById('tab-intake').addEventListener('click', () => switchToTab('intake', 'tab-intake'));
+document.getElementById('tab-audits').addEventListener('click', () => switchToTab('audits', 'tab-audits'));
+document.getElementById('tab-tds').addEventListener('click', () => switchToTab('tds', 'tab-tds'));
+document.getElementById('tab-roc').addEventListener('click', () => switchToTab('roc', 'tab-roc'));
+document.getElementById('tab-special').addEventListener('click', () => switchToTab('special', 'tab-special'));
+
+function openSheet(id){
+  const isNew = id === null;
+  const item = isNew ? {particulars:"",done_by:"",work_status:"",documents_awaited:"",remarks:"",filed:false} : DATA.find(d=>d.id===id);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew ? 'Add pending work' : 'Edit pending work'}</h2>
+      <div class="field"><label>Particulars (client name)</label><input type="text" id="f-particulars" value="${item.particulars}"></div>
+      <div class="field"><label>Done by</label><input type="text" id="f-doneby" value="${item.done_by||''}"></div>
+      <div class="field"><label>Work status</label><input type="text" id="f-workstatus" placeholder="e.g. need to verify" value="${item.work_status||''}"></div>
+      <div class="field"><label>Documents awaited</label><textarea id="f-docsawaited">${item.documents_awaited||''}</textarea></div>
+      <div class="field"><label>Other remarks</label><textarea id="f-remarks">${item.remarks||''}</textarea></div>
+      <div class="field" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="f-filed" ${item.filed ? 'checked' : ''} style="width:20px;height:20px;">
+        <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="sheet-cancel">Cancel</button>
+        <button class="btn-save" id="sheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="sheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('sheet-cancel').onclick = () => overlay.remove();
+
+  if(!isNew){
+    document.getElementById('sheet-delete').onclick = () => {
+      const confirmOverlay = document.createElement('div');
+      confirmOverlay.className = 'sheet-overlay';
+      confirmOverlay.style.zIndex = '60';
+      confirmOverlay.innerHTML = `
+        <div class="sheet" style="padding-bottom:18px;">
+          <div class="sheet-handle"></div>
+          <h2>Delete "${item.particulars}"?</h2>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">This removes it permanently from the tracker and the shared Excel file. This cannot be undone.</p>
+          <div class="sheet-actions">
+            <button class="btn-cancel" id="confirm-cancel">Cancel</button>
+            <button id="confirm-delete" style="flex:1;height:44px;border-radius:11px;font-size:14px;font-weight:600;border:none;background:var(--query);color:#fff;">Delete</button>
+          </div>
+        </div>`;
+      document.body.appendChild(confirmOverlay);
+      confirmOverlay.addEventListener('click', e => { if(e.target === confirmOverlay) confirmOverlay.remove(); });
+      document.getElementById('confirm-cancel').onclick = () => confirmOverlay.remove();
+      document.getElementById('confirm-delete').onclick = async () => {
+        document.getElementById('sync-text').textContent = "Deleting...";
+        const { error } = await supabaseClient.from('individual_returns').delete().eq('id', item.id);
+        if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+        // Update the list immediately rather than waiting for the realtime
+        // subscription to notice - if realtime isn't enabled on this table,
+        // the deleted card would otherwise keep showing until next reload,
+        // which looks exactly like "delete doesn't work".
+        DATA = DATA.filter(d => d.id !== item.id);
+        document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+        confirmOverlay.remove();
+        overlay.remove();
+        renderAll();
+      };
+    };
+  }
+
+  document.getElementById('sheet-save').onclick = async () => {
+    const name = document.getElementById('f-particulars').value.trim();
+    if(!name) return;
+    const updated = {
+      particulars: name,
+      done_by: document.getElementById('f-doneby').value.trim() || null,
+      work_status: document.getElementById('f-workstatus').value.trim() || null,
+      documents_awaited: document.getElementById('f-docsawaited').value.trim() || null,
+      remarks: document.getElementById('f-remarks').value.trim() || null,
+      filed: document.getElementById('f-filed').checked,
+      last_updated_by: 'Mobile app'
+    };
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      updated.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from('individual_returns').insert(updated));
+    } else {
+      ({ error } = await supabaseClient.from('individual_returns').update(updated).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    overlay.remove();
+    await loadData(); // refresh immediately rather than waiting on the realtime subscription
+  };
+}
+
+document.getElementById('add-btn').addEventListener('click', () => {
+  if(currentTab === 'intake') openIntakeSheet(null);
+  else if(currentTab === 'audits') openAuditSheet(null, auditsSubTab);
+  else if(currentTab === 'tds') openTdsSheet(null);
+  else if(currentTab === 'roc') openRocSheet(null);
+  else if(currentTab === 'special') openSpecialWorkSheet(null);
+  else openSheet(null);
+});
+
+function subscribeToLiveUpdates(){
+  supabaseClient
+    .channel('individual_returns_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'individual_returns' }, () => {
+      loadData();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('audit_intake_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_intake' }, () => {
+      loadAuditIntake();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('tax_audits_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tax_audits' }, () => {
+      loadTaxAudits();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('gst_audits_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gst_audits' }, () => {
+      loadGstAudits();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('tds_returns_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tds_returns' }, () => {
+      loadTdsReturns();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('roc_filings_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'roc_filings' }, () => {
+      loadRoc();
+    })
+    .subscribe();
+  supabaseClient
+    .channel('special_works_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'special_works' }, () => {
+      loadSpecialWorks();
+    })
+    .subscribe();
+}
+
+if(isConfigured){
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  loadData();
+  loadAuditIntake();
+  loadTaxAudits();
+  loadGstAudits();
+  loadTdsReturns();
+  loadRoc();
+  loadSpecialWorks();
+  subscribeToLiveUpdates();
+} else {
+  showConfigWarning();
+}
+
+// ============================================================
+// PWA install support
+// ============================================================
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(err => console.log('Service worker registration failed:', err));
+}
+
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById('install-banner').style.display = 'flex';
+});
+
+document.getElementById('install-btn').addEventListener('click', async () => {
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if(outcome === 'accepted'){
+    document.getElementById('install-banner').style.display = 'none';
+  }
+  deferredInstallPrompt = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner').style.display = 'none';
+});
+</script>
+</body>
+</html>
