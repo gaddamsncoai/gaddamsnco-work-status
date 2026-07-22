@@ -166,6 +166,17 @@ let SPECIAL_WORKS_DATA = [];
 
 let tdsQuarter = 'Q1';      // 'Q1'..'Q4' - which quarter a NEW TDS entry gets tagged with
 
+// 2026-07-22 follow-up: counts + staff-wise breakdown. Tax Audits/GST Audits
+// get a per-staff chip row (like Individuals always has); TDS/ROC/Special
+// Works only need a plain pending-vs-filed COUNT, no staff breakdown - so
+// they get a simpler two-chip summary instead. auditStaffFilter narrows the
+// Audits/GST list by clicking a staff chip (mirrors activeFilter below);
+// statusFilter narrows ROC/Special Works by clicking the Pending/Filed chip
+// (TDS doesn't need this - its Pending/Filed states are already separate
+// sub-tabs, so its count chips just jump between sub-tabs instead).
+let auditStaffFilter = null;
+let statusFilter = null;   // null | 'pending' | 'filed' - ROC/Special Works only
+
 function byParticulars(a, b){
   return (a.particulars || '').trim().toLowerCase().localeCompare((b.particulars || '').trim().toLowerCase());
 }
@@ -177,6 +188,25 @@ function byParticulars(a, b){
 function isDoneWord(v){
   const s = (v || '').trim().toLowerCase();
   return s === 'done' || s === 'filed';
+}
+
+// ROC has no single boolean "filed" field (unlike TDS) and no free-text
+// work-status word to check (unlike Special Works/Audits/GST) - its 11
+// fields are all process-tracking columns. Per the user's explicit choice
+// (2026-07-22), an ROC entry counts as Filed once EITHER the SRN number or
+// the filing status date has been filled in (an SRN is only issued once a
+// filing is actually accepted on the MCA portal, so either one is a real
+// completion signal).
+function rocIsFiled(d){
+  return !!((d.filing_status_srn || '').trim() || (d.filing_status_date || '').trim());
+}
+
+// Special Works only has a free-text Work Status field - per the user's
+// explicit choice (2026-07-22), reuses the SAME exact-word "done" check as
+// Tax Audits/GSTR-9/GSTR-9C above, so "not done yet" is correctly never
+// counted as done.
+function specialIsDone(d){
+  return isDoneWord(d.work_status);
 }
 
 // ------------------------------------------------------------------
@@ -259,6 +289,7 @@ function renderSubTabs(){
 
 function resetFiltersForNav(){
   activeFilter = null; staffFilter = ""; searchTerm = "";
+  auditStaffFilter = null; statusFilter = null;
   document.getElementById('search-input').value = "";
   const sel = document.getElementById('staff-filter');
   if(sel) sel.value = "";
@@ -398,6 +429,54 @@ function renderSummary(){
   row.querySelectorAll('.sum-chip').forEach(chip => {
     chip.addEventListener('click', () => { activeFilter = chip.dataset.staff || null; renderAll(); });
   });
+}
+
+// Generic staff-wise breakdown chip row, used by Audits (Tax Audits track)
+// and GST Audits (GSTR-9/GSTR-9C) - same "All" + one-chip-per-staff pattern
+// as renderSummary() above, just parameterized so it works for either
+// doneByKey ('audit_done_by' vs 'done_by') and filtered via a separate
+// auditStaffFilter state (so it doesn't collide with Individuals' own
+// activeFilter). Called with the already sub-tab-filtered item list (i.e.
+// after narrowing to e.g. "Tax Audits - Pending" but before any staff/search
+// filter), matching how renderSummary() computes its own chip counts.
+function renderStaffWiseSummary(items, doneByKey){
+  const withStaff = {};
+  items.forEach(d => { const s = normalizeStaffName(d[doneByKey]) || 'Unassigned'; withStaff[s] = (withStaff[s]||0)+1; });
+  const allStaff = Object.entries(withStaff).sort((a,b)=>b[1]-a[1]);
+  const colorClasses = ['c-coral','c-amber','c-violet'];
+
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `
+    <div class="sum-chip ${auditStaffFilter===null?'active':''}" data-staff="">
+      <div class="n">${items.length}</div><div class="l">All</div>
+    </div>
+    ${allStaff.map(([staff,count],i) => `
+      <div class="sum-chip ${colorClasses[i % colorClasses.length]} ${auditStaffFilter===staff?'active':''}" data-staff="${staff}">
+        <div class="n">${count}</div><div class="l">${staff}</div>
+      </div>`).join('')}`;
+  row.querySelectorAll('.sum-chip').forEach(chip => {
+    chip.addEventListener('click', () => { auditStaffFilter = chip.dataset.staff || null; renderAll(); });
+  });
+}
+
+// Generic plain two-chip count summary (Pending/Filed, or Pending/Done) -
+// used by TDS Returns, ROC, and Special Works, which the user explicitly
+// said do NOT need a staff-wise breakdown, just the two counts. `pendingActive`/
+// `filedActive` control which chip is highlighted; `onPendingClick`/
+// `onFiledClick` differ by caller - TDS jumps to the matching sub-tab (its
+// Pending/Filed states are already separate sub-tabs), while ROC/Special
+// Works toggle a client-side statusFilter (they have no sub-tab split).
+function renderCountSummary(pendingLabel, pendingCount, pendingActive, onPendingClick, filedLabel, filedCount, filedActive, onFiledClick){
+  const row = document.getElementById('summary-row');
+  row.innerHTML = `
+    <div class="sum-chip c-amber ${pendingActive?'active':''}" data-kind="pending">
+      <div class="n">${pendingCount}</div><div class="l">${pendingLabel}</div>
+    </div>
+    <div class="sum-chip c-filed ${filedActive?'active':''}" data-kind="filed">
+      <div class="n">${filedCount}</div><div class="l">${filedLabel}</div>
+    </div>`;
+  row.querySelector('[data-kind="pending"]').addEventListener('click', onPendingClick);
+  row.querySelector('[data-kind="filed"]').addEventListener('click', onFiledClick);
 }
 
 function renderStaffOptions(){
@@ -613,6 +692,12 @@ function renderAuditsGroupList(){
     doneByKey = 'done_by';
     editSub = 'gstr9c';
   }
+
+  // Staff-wise breakdown, computed from the sub-tab-filtered bucket (before
+  // the staff/search filters below) - same convention renderSummary() uses
+  // for Individuals.
+  renderStaffWiseSummary(items, doneByKey);
+  if(auditStaffFilter) items = items.filter(d => (normalizeStaffName(d[doneByKey]) || 'Unassigned') === auditStaffFilter);
   if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
 
   const list = document.getElementById('list');
@@ -734,7 +819,20 @@ function renderTdsGroupList(){
   const m = currentSubTab.match(/^q(\d)_(pending|filed)$/);
   const quarter = 'Q' + m[1];
   const wantFiled = m[2] === 'filed';
-  let items = TDS_DATA.filter(d => d.quarter === quarter && !!d.filed === wantFiled);
+
+  // Plain pending/filed COUNT for this quarter (no staff breakdown, per the
+  // user's explicit choice) - the two chips also double as quick nav
+  // between this quarter's Pending/Filed sub-tabs, since those already
+  // exist as separate sub-tabs rather than a client-side filter.
+  const quarterItems = TDS_DATA.filter(d => d.quarter === quarter);
+  const pendingCount = quarterItems.filter(d => !d.filed).length;
+  const filedCount = quarterItems.filter(d => !!d.filed).length;
+  renderCountSummary(
+    'Pending', pendingCount, !wantFiled, () => selectSubTab(`q${m[1]}_pending`),
+    'Filed', filedCount, wantFiled, () => selectSubTab(`q${m[1]}_filed`)
+  );
+
+  let items = quarterItems.filter(d => !!d.filed === wantFiled);
   if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
 
   const list = document.getElementById('list');
@@ -840,7 +938,20 @@ function openTdsSheet(id){
 // ------------------------------------------------------------------
 
 function renderRocList(){
+  // Plain pending/filed COUNT (no staff breakdown) - "Filed" = SRN no or
+  // filing status date present (rocIsFiled(), user's explicit choice
+  // 2026-07-22). Clicking a chip toggles a client-side filter, since ROC has
+  // no separate Pending/Filed sub-tabs to jump between.
+  const pendingCount = ROC_DATA.filter(d => !rocIsFiled(d)).length;
+  const filedCount = ROC_DATA.filter(d => rocIsFiled(d)).length;
+  renderCountSummary(
+    'Pending', pendingCount, statusFilter === 'pending', () => { statusFilter = statusFilter === 'pending' ? null : 'pending'; renderAll(); },
+    'Filed', filedCount, statusFilter === 'filed', () => { statusFilter = statusFilter === 'filed' ? null : 'filed'; renderAll(); }
+  );
+
   let items = ROC_DATA;
+  if(statusFilter === 'pending') items = items.filter(d => !rocIsFiled(d));
+  else if(statusFilter === 'filed') items = items.filter(d => rocIsFiled(d));
   if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
   const list = document.getElementById('list');
   if(items.length === 0){
@@ -848,7 +959,7 @@ function renderRocList(){
     return;
   }
   list.innerHTML = items.map(d => `
-    <div class="work-card s-docs">
+    <div class="work-card ${rocIsFiled(d) ? 's-filed' : 's-docs'}">
       <div class="work-top">
         <div>
           <div class="work-name">${d.particulars}</div>
@@ -857,6 +968,7 @@ function renderRocList(){
             ${d.filing_status_date ? `<span><i class="ti ti-calendar" style="font-size:13px"></i>${d.filing_status_date}</span>` : ''}
           </div>
         </div>
+        <span class="badge ${rocIsFiled(d) ? 'filed' : 'docs'}">${rocIsFiled(d) ? 'Filed' : 'Pending'}</span>
       </div>
       <div class="work-actions">
         <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openRocSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
@@ -942,7 +1054,21 @@ function openRocSheet(id){
 // ------------------------------------------------------------------
 
 function renderSpecialWorksList(){
+  // Plain pending/done COUNT (no staff breakdown) - "Done" = exact-word
+  // "done" in Work Status (specialIsDone(), user's explicit choice
+  // 2026-07-22, same guard as Tax Audits/GST so "not done yet" isn't
+  // miscounted). Clicking a chip toggles a client-side filter, since
+  // Special Works has no separate Pending/Done sub-tabs to jump between.
+  const pendingCount = SPECIAL_WORKS_DATA.filter(d => !specialIsDone(d)).length;
+  const doneCount = SPECIAL_WORKS_DATA.filter(d => specialIsDone(d)).length;
+  renderCountSummary(
+    'Pending', pendingCount, statusFilter === 'pending', () => { statusFilter = statusFilter === 'pending' ? null : 'pending'; renderAll(); },
+    'Done', doneCount, statusFilter === 'filed', () => { statusFilter = statusFilter === 'filed' ? null : 'filed'; renderAll(); }
+  );
+
   let items = SPECIAL_WORKS_DATA;
+  if(statusFilter === 'pending') items = items.filter(d => !specialIsDone(d));
+  else if(statusFilter === 'filed') items = items.filter(d => specialIsDone(d));
   if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
   const list = document.getElementById('list');
   if(items.length === 0){
@@ -950,7 +1076,7 @@ function renderSpecialWorksList(){
     return;
   }
   list.innerHTML = items.map(d => `
-    <div class="work-card s-docs">
+    <div class="work-card ${specialIsDone(d) ? 's-filed' : 's-docs'}">
       <div class="work-top">
         <div>
           <div class="work-name">${d.particulars}</div>
@@ -959,7 +1085,10 @@ function renderSpecialWorksList(){
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
           </div>
         </div>
-        ${d.fees_received_status ? `<span class="badge docs">${d.fees_received_status}</span>` : ''}
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
+          <span class="badge ${specialIsDone(d) ? 'filed' : 'docs'}">${specialIsDone(d) ? 'Done' : 'Pending'}</span>
+          ${d.fees_received_status ? `<span class="badge docs">${d.fees_received_status}</span>` : ''}
+        </div>
       </div>
       <div class="work-actions">
         <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openSpecialWorkSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
@@ -1025,13 +1154,13 @@ function openSpecialWorkSheet(id){
 }
 
 function renderAll(){
-  // The staff-summary chip row only makes sense for Individuals (the only
-  // place with a free-text "done by" concept worth breaking down by
-  // person) and for the Tax Audits list screening count - hidden everywhere
-  // else now that every group/sub-tab is reachable from the tab bars
-  // directly instead of needing this row as a sub-selector.
-  const showSummary = (currentGroup === 'individuals') || (currentGroup === 'audits' && currentSubTab === 'intake');
-  document.getElementById('summary-row').style.display = showSummary ? 'flex' : 'none';
+  // 2026-07-22 follow-up: every group now shows SOME kind of summary row -
+  // Individuals/Audits/GST get per-staff chips, Tax Audits list keeps its
+  // "Awaiting data" count, and TDS/ROC/Special Works get a plain
+  // Pending/Filed count (see renderStaffWiseSummary()/renderCountSummary()
+  // above) - so the row is always visible now, just populated differently
+  // per group/sub-tab by whichever render*() function runs below.
+  document.getElementById('summary-row').style.display = 'flex';
 
   if(currentGroup === 'individuals'){
     renderSummary(); renderStaffOptions(); renderList();
