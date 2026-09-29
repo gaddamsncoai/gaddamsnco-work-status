@@ -164,6 +164,16 @@ let TDS_DATA = [];          // all 4 quarters together, told apart by .quarter
 let ROC_DATA = [];
 let SPECIAL_WORKS_DATA = [];
 let NOTICES_DATA = [];       // 2026-09-05: Notices, own table, Pending/Completed like Special Works
+// 2026-09-29: TDS Revised Returns (own table, tds_revised_returns) and every
+// tab added from the office tracker's Customise screen (one shared table,
+// custom_works, told apart by tab_key).
+let TDS_REV_DATA = [];
+let CUSTOM_DATA = [];
+// Layout sent by the office tracker (Supabase app_settings, key
+// 'mobile_layout'): per family, the columns added from Customise that were
+// marked for the phone, plus built-in dropdown choices (FY / Quarter).
+let LAYOUT = {families: {}, custom_tabs: []};
+const TDS_REV_FY_FALLBACK = ['2026-27','2025-26','2024-25','2023-24','2022-23','2021-22','2020-21','2019-20'];
 
 let tdsQuarter = 'Q1';      // 'Q1'..'Q4' - which quarter a NEW TDS entry gets tagged with
 
@@ -276,6 +286,8 @@ const NAV_GROUPS = [
     { key: 'q3_filed', label: 'Q3 - Filed' },
     { key: 'q4_pending', label: 'Q4 - Pending' },
     { key: 'q4_filed', label: 'Q4 - Filed' },
+    { key: 'rev_pending', label: 'Revised - Pending' },
+    { key: 'rev_filed', label: 'Revised - Filed' },
   ]},
   { key: 'roc', label: 'ROC', icon: 'ti-building', tabs: [
     { key: 'roc', label: 'ROC' },
@@ -289,6 +301,12 @@ const NAV_GROUPS = [
     { key: 'special_completed', label: 'Completed' },
   ]},
 ];
+
+// Built-in groups, kept so custom tabs can be re-applied whenever the office
+// tracker's layout changes (applyLayoutToNav below rebuilds NAV_GROUPS).
+const BASE_NAV_GROUPS = JSON.parse(JSON.stringify(NAV_GROUPS));
+// office tracker group key -> this app's group key
+const TRACKER_GROUP_TO_APP = {individuals:'individuals', tax_audits:'audits', tds:'tds', roc:'roc', notices:'notices', special_works:'special'};
 
 let currentGroup = 'individuals';
 let currentSubTab = 'ind_pending';
@@ -552,6 +570,7 @@ function renderList(){
           <div class="work-meta">
             <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+            ${extraMetaHtml('pending|individuals', d)}
           </div>
         </div>
         <span class="badge ${d.filed ? 'filed' : 'docs'}">${d.filed ? 'Filed' : 'Pending'}</span>
@@ -603,7 +622,7 @@ function renderIntakeList(){
   list.innerHTML = items.map(d => `
     <div class="work-card s-docs">
       <div class="work-top">
-        <div><div class="work-name">${d.particulars}</div></div>
+        <div><div class="work-name">${d.particulars}</div><div class="work-meta">${extraMetaHtml('pending|audit_intake', d)}</div></div>
         <span class="badge docs">Awaited</span>
       </div>
       <div class="work-actions">
@@ -653,6 +672,7 @@ function renderNotReceivedList(){
           <div class="work-name">${d.particulars}</div>
           <div class="work-meta">
             <span><i class="ti ti-alert-circle" style="font-size:13px"></i>${d.data_received_text}</span>
+            ${extraMetaHtml('pending|audit_intake', d)}
           </div>
         </div>
         <span class="badge query">Not received</span>
@@ -701,6 +721,7 @@ function openIntakeSheet(id, markNotReceived){
       <div class="sheet-handle"></div>
       <h2>${isNew ? 'Add client to audit intake' : 'Edit client name'}</h2>
       <div class="field"><label>Name of audit client</label><input type="text" id="fi-particulars" value="${item.particulars}"></div>
+      ${extraFieldsHtml('pending|audit_intake', item)}
       <div class="sheet-actions">
         <button class="btn-cancel" id="isheet-cancel">Cancel</button>
         <button class="btn-save" id="isheet-save">Save</button>
@@ -728,20 +749,22 @@ function openIntakeSheet(id, markNotReceived){
     if(!name) return;
     if(!confirmSimilarName(name, currentTabItems(), isNew ? null : item.id)) return;
     document.getElementById('sync-text').textContent = "Saving...";
+    const exA = readExtra('pending|audit_intake', item);
     let error;
     if(isNew){
-      ({ error } = await supabaseClient.from('audit_intake').insert({
+      const ins = {
         excel_row_id: `app-${Date.now()}`,
         particulars: name,
         data_received: false,
         data_received_text: markNotReceived ? 'Not received' : null,
         last_updated_by: 'Mobile app',
-      }));
+      };
+      if(exA) ins.extra = exA;
+      ({ error } = await supabaseClient.from('audit_intake').insert(ins));
     } else {
-      ({ error } = await supabaseClient.from('audit_intake').update({
-        particulars: name,
-        last_updated_by: 'Mobile app',
-      }).eq('id', item.id));
+      const upd = { particulars: name, last_updated_by: 'Mobile app' };
+      if(exA) upd.extra = exA;
+      ({ error } = await supabaseClient.from('audit_intake').update(upd).eq('id', item.id));
     }
     if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
     overlay.remove();
@@ -805,6 +828,7 @@ function renderAuditsGroupList(){
   if(auditStaffFilter) items = items.filter(d => (normalizeStaffName(d[doneByKey]) || 'Unassigned') === auditStaffFilter);
   if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
 
+  const auditFam = editSub === 'itr' ? 'pending|audits' : (editSub === 'gstr9' ? 'pending|gstr9_pending' : 'pending|gstr9c_pending');
   const list = document.getElementById('list');
   if(items.length === 0){
     list.innerHTML = `<div class="empty">No entries here yet — add one below.</div>`;
@@ -818,6 +842,7 @@ function renderAuditsGroupList(){
           <div class="work-meta">
             <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d[doneByKey])||'Unassigned'}</span>
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+            ${extraMetaHtml(auditFam, d)}
           </div>
         </div>
       </div>
@@ -827,6 +852,9 @@ function renderAuditsGroupList(){
     </div>`).join('');
 }
 
+function auditFamOf(sub){
+  return sub === 'itr' ? 'pending|audits' : (sub === 'gstr9' ? 'pending|gstr9_pending' : 'pending|gstr9c_pending');
+}
 function openAuditSheet(id, sub){
   const isNew = id === null;
   const table = sub === 'itr' ? 'tax_audits' : 'gst_audits';
@@ -856,6 +884,7 @@ function openAuditSheet(id, sub){
       <div class="field"><label>${sub==='itr'?'Audit done by':'Done by'}</label><input type="text" id="fa-doneby" value="${(sub==='itr'?item.audit_done_by:item.done_by)||''}"></div>
       <div class="field"><label>Work status</label><input type="text" id="fa-workstatus" value="${item.work_status||''}"></div>
       ${extraFields}
+      ${extraFieldsHtml(auditFamOf(sub), item)}
       <div class="sheet-actions">
         <button class="btn-cancel" id="asheet-cancel">Cancel</button>
         <button class="btn-save" id="asheet-save">Save</button>
@@ -900,6 +929,7 @@ function openAuditSheet(id, sub){
       payload.done_by = doneBy;
       payload.form = title;
     }
+    const exAu = readExtra(auditFamOf(sub), item); if(exAu) payload.extra = exAu;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -955,6 +985,7 @@ function renderTdsGroupList(){
             <span><i class="ti ti-user" style="font-size:13px"></i>${normalizeStaffName(d.done_by)||'Unassigned'}</span>
             ${d.form_type ? `<span><i class="ti ti-file-text" style="font-size:13px"></i>${d.form_type}</span>` : ''}
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
+            ${extraMetaHtml('pending|tds_q1_pending', d)}
           </div>
         </div>
         <span class="badge ${d.filed?'filed':'docs'}">${d.filed?'Filed':'Pending'}</span>
@@ -988,6 +1019,7 @@ function openTdsSheet(id){
       <div class="field"><label>Form (24Q/26Q)</label><input type="text" id="ft-formtype" value="${item.form_type||''}"></div>
       <div class="field"><label>Work status</label><input type="text" id="ft-workstatus" value="${item.work_status||''}"></div>
       <div class="field"><label>Done by</label><input type="text" id="ft-doneby" value="${item.done_by||''}"></div>
+      ${extraFieldsHtml('pending|tds_q1_pending', item)}
       <div class="field" style="display:flex;align-items:center;gap:10px;">
         <input type="checkbox" id="ft-filed" ${item.filed?'checked':''} style="width:20px;height:20px;">
         <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
@@ -1024,6 +1056,7 @@ function openTdsSheet(id){
       filed: document.getElementById('ft-filed').checked,
       last_updated_by: 'Mobile app',
     };
+    const exT = readExtra('pending|tds_q1_pending', item); if(exT) payload.extra = exT;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -1073,6 +1106,7 @@ function renderRocList(){
           <div class="work-meta">
             ${d.filing_status_srn ? `<span><i class="ti ti-check" style="font-size:13px"></i>SRN ${d.filing_status_srn}</span>` : ''}
             ${d.filing_status_date ? `<span><i class="ti ti-calendar" style="font-size:13px"></i>${d.filing_status_date}</span>` : ''}
+            ${extraMetaHtml('pending|roc', d)}
           </div>
         </div>
         <span class="badge ${rocIsFiled(d) ? 'filed' : 'docs'}">${rocIsFiled(d) ? 'Filed' : 'Pending'}</span>
@@ -1103,6 +1137,7 @@ function openRocSheet(id){
       <div class="field"><label>Sent to CS</label><input type="text" id="fr-senttocs" value="${item.sent_to_cs||''}"></div>
       <div class="field"><label>Filing status - date</label><input type="text" id="fr-fdate" value="${item.filing_status_date||''}"></div>
       <div class="field"><label>Filing status - SRN no</label><input type="text" id="fr-fsrn" value="${item.filing_status_srn||''}"></div>
+      ${extraFieldsHtml('pending|roc', item)}
       <div class="sheet-actions">
         <button class="btn-cancel" id="rsheet-cancel">Cancel</button>
         <button class="btn-save" id="rsheet-save">Save</button>
@@ -1142,6 +1177,7 @@ function openRocSheet(id){
       filing_status_srn: g('fr-fsrn'),
       last_updated_by: 'Mobile app',
     };
+    const exR = readExtra('pending|roc', item); if(exR) payload.extra = exR;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -1194,6 +1230,7 @@ function renderNoticesList(){
             ${d.reply_due_date ? `<span><i class="ti ti-alarm" style="font-size:13px"></i>Reply by ${d.reply_due_date}</span>` : ''}
             ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${d.work_status}</span>` : ''}
             ${d.date_of_completion ? `<span><i class="ti ti-calendar-check" style="font-size:13px"></i>Completed ${d.date_of_completion}</span>` : ''}
+            ${extraMetaHtml('pending|notices', d)}
           </div>
         </div>
         <span class="badge ${specialIsDone(d) ? 'filed' : 'query'}">${specialIsDone(d) ? 'Completed' : 'Pending'}</span>
@@ -1223,6 +1260,7 @@ function openNoticeSheet(id){
       <div class="field"><label>Work status</label><input type="text" id="fn-workstatus" placeholder="type &quot;completed&quot; to move it to Completed" value="${item.work_status||''}"></div>
       <div class="field"><label>Date of completion</label><input type="text" id="fn-datecompletion" value="${item.date_of_completion||''}"></div>
       <div class="field"><label>Remarks</label><textarea id="fn-remarks">${item.remarks||''}</textarea></div>
+      ${extraFieldsHtml('pending|notices', item)}
       <div class="sheet-actions">
         <button class="btn-cancel" id="nsheet-cancel">Cancel</button>
         <button class="btn-save" id="nsheet-save">Save</button>
@@ -1260,6 +1298,7 @@ function openNoticeSheet(id){
       remarks: g('fn-remarks'),
       last_updated_by: 'Mobile app',
     };
+    const exN = readExtra('pending|notices', item); if(exN) payload.extra = exN;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -1312,6 +1351,7 @@ function renderSpecialWorksList(){
             ${d.date_of_work ? `<span><i class="ti ti-calendar" style="font-size:13px"></i>Started ${d.date_of_work}</span>` : ''}
             ${d.date_of_completion ? `<span><i class="ti ti-calendar-check" style="font-size:13px"></i>Completed ${d.date_of_completion}</span>` : ''}
             ${d.udin ? `<span><i class="ti ti-id" style="font-size:13px"></i>UDIN ${d.udin}</span>` : ''}
+            ${extraMetaHtml('pending|special_works', d)}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
@@ -1346,6 +1386,7 @@ function openSpecialWorkSheet(id){
       <div class="field"><label>Date of completion</label><input type="text" id="fs-datecompletion" value="${item.date_of_completion||''}"></div>
       <div class="field"><label>Fee received status</label><input type="text" id="fs-fees" value="${item.fees_received_status||''}"></div>
       <div class="field"><label>UDIN</label><input type="text" id="fs-udin" value="${item.udin||''}"></div>
+      ${extraFieldsHtml('pending|special_works', item)}
       <div class="sheet-actions">
         <button class="btn-cancel" id="swsheet-cancel">Cancel</button>
         <button class="btn-save" id="swsheet-save">Save</button>
@@ -1382,6 +1423,7 @@ function openSpecialWorkSheet(id){
       // fee_details deliberately absent - office tracker only.
       last_updated_by: 'Mobile app',
     };
+    const exS = readExtra('pending|special_works', item); if(exS) payload.extra = exS;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -1396,6 +1438,320 @@ function openSpecialWorkSheet(id){
   };
 }
 
+
+// ------------------------------------------------------------------
+// 2026-09-29: columns and tabs added from the office tracker's Customise
+// screen. Added-column values travel in each table's `extra` field.
+// ------------------------------------------------------------------
+function escHtml(v){
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function famLayout(fam){ return (LAYOUT.families || {})[fam] || {extra: [], options: {}, defaults: {}}; }
+function extraCols(fam){ return fam ? (famLayout(fam).extra || []) : []; }
+
+// Which office-tracker column family the sub-tab on screen belongs to.
+function famIdForSub(group, sub){
+  if(sub && sub.indexOf('cx|') === 0) return 'pending|' + sub.split('|')[1] + '_pending';
+  if(group === 'individuals') return 'pending|individuals';
+  if(group === 'audits'){
+    if(sub === 'intake' || sub === 'not_received') return 'pending|audit_intake';
+    if(sub.indexOf('ta_') === 0) return 'pending|audits';
+    if(sub.indexOf('gstr9c_') === 0) return 'pending|gstr9c_pending';
+    if(sub.indexOf('gstr9_') === 0) return 'pending|gstr9_pending';
+  }
+  if(group === 'tds') return sub.indexOf('rev_') === 0 ? 'pending|tds_revised_pending' : 'pending|tds_q1_pending';
+  if(group === 'roc') return 'pending|roc';
+  if(group === 'notices') return 'pending|notices';
+  if(group === 'special') return 'pending|special_works';
+  return null;
+}
+
+function fieldHtml(id, label, type, value, options){
+  const v = value == null ? '' : String(value);
+  if(type === 'select'){
+    const opts = (options || []).slice();
+    let o = '<option value="">-- select --</option>';
+    if(v && !opts.includes(v)) o += `<option value="${escHtml(v)}" selected>${escHtml(v)}</option>`;
+    opts.forEach(x => { o += `<option value="${escHtml(x)}" ${x === v ? 'selected' : ''}>${escHtml(x)}</option>`; });
+    return `<div class="field"><label>${escHtml(label)}</label><select id="${id}">${o}</select></div>`;
+  }
+  if(type === 'textarea') return `<div class="field"><label>${escHtml(label)}</label><textarea id="${id}">${escHtml(v)}</textarea></div>`;
+  const mode = type === 'number' ? ' inputmode="decimal"' : '';
+  return `<div class="field"><label>${escHtml(label)}</label><input type="text"${mode} id="${id}" value="${escHtml(v)}"></div>`;
+}
+function extraMetaHtml(fam, d){
+  const ex = (d && d.extra) || {};
+  return extraCols(fam).filter(c => ex[c.key]).map(c =>
+    `<span><i class="ti ti-point" style="font-size:13px"></i>${escHtml(c.label)}: ${escHtml(ex[c.key])}</span>`).join('');
+}
+function extraFieldsHtml(fam, item){
+  const ex = (item && item.extra) || {};
+  return extraCols(fam).map(c => fieldHtml('fx-' + c.key, c.label, c.type, ex[c.key], c.options)).join('');
+}
+// null when this tab has no added columns, so tables that never got the
+// `extra` field are not sent one.
+function readExtra(fam, item){
+  const cols = extraCols(fam);
+  if(!cols.length) return null;
+  const ex = Object.assign({}, (item && item.extra) || {});
+  cols.forEach(c => { const el = document.getElementById('fx-' + c.key); if(el){ const v = el.value.trim(); ex[c.key] = v || null; } });
+  return ex;
+}
+
+function applyLayoutToNav(){
+  NAV_GROUPS.length = 0;
+  JSON.parse(JSON.stringify(BASE_NAV_GROUPS)).forEach(g => NAV_GROUPS.push(g));
+  (LAYOUT.custom_tabs || []).forEach(t => {
+    const appKey = TRACKER_GROUP_TO_APP[t.group] || t.group;
+    let g = NAV_GROUPS.find(x => x.key === appKey);
+    if(!g){ g = {key: appKey, label: t.group_label || t.label, icon: 'ti-folder', tabs: []}; NAV_GROUPS.push(g); }
+    g.tabs.push({key: 'cx|' + t.key + '|pending', label: t.label + ' - Pending'});
+    g.tabs.push({key: 'cx|' + t.key + '|completed', label: t.label + ' - Completed'});
+  });
+  const g = currentGroupObj();
+  if(!g){ currentGroup = NAV_GROUPS[0].key; currentSubTab = NAV_GROUPS[0].tabs[0].key; }
+  else if(!g.tabs.some(t => t.key === currentSubTab)) currentSubTab = g.tabs[0].key;
+  renderTopTabs();
+  renderSubTabs();
+}
+
+async function loadLayout(){
+  const { data, error } = await supabaseClient.from('app_settings').select('*').eq('key', 'mobile_layout');
+  if(error){ console.error(error); return; }   // table not created yet - app works as before
+  if(data && data[0] && data[0].value) LAYOUT = Object.assign({families: {}, custom_tabs: []}, data[0].value);
+  applyLayoutToNav();
+  renderAll();
+}
+async function loadTdsRevised(){
+  const { data, error } = await supabaseClient.from('tds_revised_returns').select('*');
+  if(error){ console.error(error); return; }
+  TDS_REV_DATA = (data || []).slice().sort(byParticulars);
+  renderAll();
+}
+async function loadCustomWorks(){
+  const { data, error } = await supabaseClient.from('custom_works').select('*');
+  if(error){ console.error(error); return; }
+  CUSTOM_DATA = (data || []).slice().sort(byParticulars);
+  renderAll();
+}
+
+// ------------------------------------------------------------------
+// TDS Revised Returns (2026-09-29): Pending / Filed, like the quarter tabs,
+// plus FY, Quarter and the reason for revision.
+// ------------------------------------------------------------------
+function tdsRevOptions(key){
+  const f = famLayout('pending|tds_revised_pending');
+  if(f.options && f.options[key] && f.options[key].length) return f.options[key];
+  return key === 'fy' ? TDS_REV_FY_FALLBACK : ['Q1','Q2','Q3','Q4'];
+}
+function renderTdsRevisedList(){
+  const wantFiled = currentSubTab === 'rev_filed';
+  const fam = 'pending|tds_revised_pending';
+  renderCountSummary(
+    'Pending', TDS_REV_DATA.filter(d => !d.filed).length, !wantFiled, () => selectSubTab('rev_pending'),
+    'Filed', TDS_REV_DATA.filter(d => !!d.filed).length, wantFiled, () => selectSubTab('rev_filed')
+  );
+  let items = TDS_REV_DATA.filter(d => !!d.filed === wantFiled);
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No ${wantFiled ? 'filed' : 'pending'} revised returns yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card ${d.filed?'s-filed':'s-docs'}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${escHtml(d.particulars)}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${escHtml(normalizeStaffName(d.done_by)||'Unassigned')}</span>
+            ${d.fy ? `<span><i class="ti ti-calendar" style="font-size:13px"></i>FY ${escHtml(d.fy)}</span>` : ''}
+            ${d.quarter ? `<span><i class="ti ti-calendar-stats" style="font-size:13px"></i>${escHtml(d.quarter)}</span>` : ''}
+            ${d.form_type ? `<span><i class="ti ti-file-text" style="font-size:13px"></i>${escHtml(d.form_type)}</span>` : ''}
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${escHtml(d.work_status)}</span>` : ''}
+            ${extraMetaHtml(fam, d)}
+          </div>
+        </div>
+        <span class="badge ${d.filed?'filed':'docs'}">${d.filed?'Filed':'Pending'}</span>
+      </div>
+      ${d.revision_reason ? `<div class="work-remarks"><strong>Reason:</strong> ${escHtml(d.revision_reason)}</div>` : ''}
+      <div class="work-actions">
+        <button class="work-actions-toggle" onclick="quickTdsRevFiledToggle('${d.id}', ${!d.filed})" style="flex:1;height:33px;font-size:12px;border:1px solid var(--border);border-radius:9px;background:${d.filed ? 'var(--bg)' : 'var(--filed-bg)'};color:${d.filed ? 'var(--text-secondary)' : 'var(--filed)'};font-weight:600;">
+          ${d.filed ? 'Mark as pending' : 'Mark as filed'}
+        </button>
+        <button class="edit-btn" aria-label="Edit" onclick="openTdsRevisedSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i></button>
+      </div>
+    </div>`).join('');
+}
+async function quickTdsRevFiledToggle(id, newVal){
+  document.getElementById('sync-text').textContent = "Saving...";
+  const { error } = await supabaseClient.from('tds_revised_returns').update({ filed: newVal, last_updated_by: 'Mobile app' }).eq('id', id);
+  if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+  document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+  await loadTdsRevised();
+}
+function openTdsRevisedSheet(id){
+  const isNew = id === null;
+  const fam = 'pending|tds_revised_pending';
+  const defFy = (famLayout(fam).defaults || {}).fy || '2025-26';
+  const item = isNew ? {particulars:'',form_type:'',fy:defFy,quarter:'',revision_reason:'',work_status:'',done_by:'',filed:false} : TDS_REV_DATA.find(d=>d.id===id);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} revised TDS return</h2>
+      ${fieldHtml('fv-particulars', 'Particulars (client name)', 'text', item.particulars)}
+      ${fieldHtml('fv-formtype', 'Form (24Q/26Q)', 'text', item.form_type)}
+      ${fieldHtml('fv-fy', 'FY', 'select', item.fy, tdsRevOptions('fy'))}
+      ${fieldHtml('fv-quarter', 'Quarter', 'select', item.quarter, tdsRevOptions('quarter'))}
+      ${fieldHtml('fv-reason', 'Reason for revision', 'textarea', item.revision_reason)}
+      ${fieldHtml('fv-workstatus', 'Work status', 'text', item.work_status)}
+      ${fieldHtml('fv-doneby', 'Done by', 'text', item.done_by)}
+      ${extraFieldsHtml(fam, item)}
+      <div class="field" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="fv-filed" ${item.filed?'checked':''} style="width:20px;height:20px;">
+        <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="vsheet-cancel">Cancel</button>
+        <button class="btn-save" id="vsheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="vsheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('vsheet-cancel').onclick = () => overlay.remove();
+  if(!isNew){
+    document.getElementById('vsheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('tds_revised_returns').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await loadTdsRevised();
+    };
+  }
+  document.getElementById('vsheet-save').onclick = async () => {
+    const name = document.getElementById('fv-particulars').value.trim();
+    if(!name) return;
+    if(!confirmSimilarName(name, currentTabItems(), isNew ? null : item.id)) return;
+    const g = i => document.getElementById(i).value.trim() || null;
+    const payload = {
+      particulars: name, form_type: g('fv-formtype'), fy: g('fv-fy'), quarter: g('fv-quarter'),
+      revision_reason: g('fv-reason'), work_status: g('fv-workstatus'), done_by: g('fv-doneby'),
+      filed: document.getElementById('fv-filed').checked, last_updated_by: 'Mobile app',
+    };
+    const ex = readExtra(fam, item); if(ex) payload.extra = ex;
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      ({ error } = await supabaseClient.from('tds_revised_returns').insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from('tds_revised_returns').update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+    overlay.remove();
+    await loadTdsRevised();
+  };
+}
+
+// ------------------------------------------------------------------
+// Tabs added from the office tracker's Customise screen. Each is a
+// Pending / Completed pair; "completed" / "done" / "filed" in Work status
+// moves a row across, exactly as in Special Works and Notices.
+// ------------------------------------------------------------------
+function customTabItems(){
+  const [, key, which] = currentSubTab.split('|');
+  return CUSTOM_DATA.filter(d => d.tab_key === key && specialIsDone(d) === (which === 'completed'));
+}
+function renderCustomTabList(){
+  const [, key, which] = currentSubTab.split('|');
+  const fam = 'pending|' + key + '_pending';
+  let items = customTabItems();
+  renderStaffWiseSummary(items, 'done_by');
+  if(auditStaffFilter) items = items.filter(d => (normalizeStaffName(d.done_by) || 'Unassigned') === auditStaffFilter);
+  if(searchTerm) items = items.filter(d => (d.particulars||'').toLowerCase().includes(searchTerm.toLowerCase()));
+  const list = document.getElementById('list');
+  if(items.length === 0){
+    list.innerHTML = `<div class="empty">No ${which === 'completed' ? 'completed' : 'pending'} entries yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(d => `
+    <div class="work-card ${specialIsDone(d) ? 's-filed' : 's-docs'}">
+      <div class="work-top">
+        <div>
+          <div class="work-name">${escHtml(d.particulars)}</div>
+          <div class="work-meta">
+            <span><i class="ti ti-user" style="font-size:13px"></i>${escHtml(normalizeStaffName(d.done_by)||'Unassigned')}</span>
+            ${d.work_status ? `<span><i class="ti ti-progress" style="font-size:13px"></i>${escHtml(d.work_status)}</span>` : ''}
+            ${extraMetaHtml(fam, d)}
+          </div>
+        </div>
+        <span class="badge ${specialIsDone(d) ? 'filed' : 'docs'}">${specialIsDone(d) ? 'Completed' : 'Pending'}</span>
+      </div>
+      <div class="work-actions">
+        <button class="edit-btn" style="width:100%;" aria-label="Edit" onclick="openCustomSheet('${d.id}')"><i class="ti ti-edit" style="font-size:15px"></i>&nbsp;Edit</button>
+      </div>
+    </div>`).join('');
+}
+function openCustomSheet(id){
+  const isNew = id === null;
+  const key = currentSubTab.split('|')[1];
+  const tab = (LAYOUT.custom_tabs || []).find(t => t.key === key) || {label: 'entry'};
+  const fam = 'pending|' + key + '_pending';
+  const item = isNew ? {particulars:'',done_by:'',work_status:''} : CUSTOM_DATA.find(d=>d.id===id);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>${isNew?'Add':'Edit'} ${escHtml(tab.label)}</h2>
+      ${fieldHtml('fc-particulars', 'Client name', 'text', item.particulars)}
+      ${fieldHtml('fc-doneby', 'Staff assigned', 'text', item.done_by)}
+      <div class="field"><label>Work status</label><input type="text" id="fc-workstatus" placeholder="type &quot;completed&quot; to move it to Completed" value="${escHtml(item.work_status||'')}"></div>
+      ${extraFieldsHtml(fam, item)}
+      <div class="sheet-actions">
+        <button class="btn-cancel" id="csheet-cancel">Cancel</button>
+        <button class="btn-save" id="csheet-save">Save</button>
+      </div>
+      ${!isNew ? `<button id="csheet-delete" style="width:100%;height:40px;margin-top:10px;background:none;border:none;color:var(--query);font-size:13px;font-weight:500;">Delete this entry</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('csheet-cancel').onclick = () => overlay.remove();
+  if(!isNew){
+    document.getElementById('csheet-delete').onclick = async () => {
+      document.getElementById('sync-text').textContent = "Deleting...";
+      const { error } = await supabaseClient.from('custom_works').delete().eq('id', item.id);
+      if(error){ console.error(error); document.getElementById('sync-text').textContent = "Delete failed — check connection"; return; }
+      overlay.remove();
+      await loadCustomWorks();
+    };
+  }
+  document.getElementById('csheet-save').onclick = async () => {
+    const name = document.getElementById('fc-particulars').value.trim();
+    if(!name) return;
+    if(!confirmSimilarName(name, currentTabItems(), isNew ? null : item.id)) return;
+    const g = i => document.getElementById(i).value.trim() || null;
+    const payload = { particulars: name, done_by: g('fc-doneby'), work_status: g('fc-workstatus'), last_updated_by: 'Mobile app' };
+    const ex = readExtra(fam, item); payload.extra = ex || {};
+    document.getElementById('sync-text').textContent = "Saving...";
+    let error;
+    if(isNew){
+      payload.excel_row_id = `app-${Date.now()}`;
+      payload.tab_key = key;
+      ({ error } = await supabaseClient.from('custom_works').insert(payload));
+    } else {
+      ({ error } = await supabaseClient.from('custom_works').update(payload).eq('id', item.id));
+    }
+    if(error){ console.error(error); document.getElementById('sync-text').textContent = "Save failed — check connection"; return; }
+    document.getElementById('sync-text').textContent = "Live — synced with office Excel";
+    overlay.remove();
+    await loadCustomWorks();
+  };
+}
 
 // ------------------------------------------------------------------
 // Similar-name warning (2026-09-03) - mirrors serve.py's find_similar_name()
@@ -1445,6 +1801,9 @@ function nameSimilarity(a, b){
 // The rows of the tab currently on screen - deliberately the same buckets the
 // render functions use, so "this tab" means exactly what is visible.
 function currentTabItems(){
+  if(currentSubTab.indexOf('cx|') === 0) return customTabItems();
+  if(currentGroup === 'tds' && currentSubTab.indexOf('rev_') === 0)
+    return TDS_REV_DATA.filter(d => !!d.filed === (currentSubTab === 'rev_filed'));
   if(currentGroup === 'individuals')
     return DATA.filter(d => currentSubTab === 'ind_filed' ? d.filed : !d.filed);
   if(currentGroup === 'audits'){
@@ -1501,6 +1860,11 @@ function renderAll(){
   // per group/sub-tab by whichever render*() function runs below.
   document.getElementById('summary-row').style.display = 'flex';
 
+  if(currentSubTab.indexOf('cx|') === 0){ renderCustomTabList(); return; }
+  if(!['individuals','audits','tds','roc','notices','special'].includes(currentGroup)){
+    document.getElementById('list').innerHTML = '<div class="empty">Nothing here yet.</div>';
+    return;
+  }
   if(currentGroup === 'individuals'){
     renderSummary(); renderStaffOptions(); renderList();
   } else if(currentGroup === 'audits'){
@@ -1508,7 +1872,8 @@ function renderAll(){
     else if(currentSubTab === 'not_received'){ renderNotReceivedSummary(); renderNotReceivedList(); }
     else renderAuditsGroupList();
   } else if(currentGroup === 'tds'){
-    renderTdsGroupList();
+    if(currentSubTab.indexOf('rev_') === 0) renderTdsRevisedList();
+    else renderTdsGroupList();
   } else if(currentGroup === 'roc'){
     renderRocList();
   } else if(currentGroup === 'notices'){
@@ -1536,6 +1901,7 @@ function openSheet(id){
       <div class="field"><label>Work status</label><input type="text" id="f-workstatus" placeholder="e.g. need to verify" value="${item.work_status||''}"></div>
       <div class="field"><label>Documents awaited</label><textarea id="f-docsawaited">${item.documents_awaited||''}</textarea></div>
       <div class="field"><label>Other remarks</label><textarea id="f-remarks">${item.remarks||''}</textarea></div>
+      ${extraFieldsHtml('pending|individuals', item)}
       <div class="field" style="display:flex;align-items:center;gap:10px;">
         <input type="checkbox" id="f-filed" ${item.filed ? 'checked' : ''} style="width:20px;height:20px;">
         <label style="margin:0;font-size:14px;color:var(--text);">Filed</label>
@@ -1598,6 +1964,7 @@ function openSheet(id){
       filed: document.getElementById('f-filed').checked,
       last_updated_by: 'Mobile app'
     };
+    const exI = readExtra('pending|individuals', item); if(exI) updated.extra = exI;
     document.getElementById('sync-text').textContent = "Saving...";
     let error;
     if(isNew){
@@ -1613,6 +1980,8 @@ function openSheet(id){
 }
 
 document.getElementById('add-btn').addEventListener('click', () => {
+  if(currentSubTab.indexOf('cx|') === 0){ openCustomSheet(null); return; }
+  if(currentGroup === 'tds' && currentSubTab.indexOf('rev_') === 0){ openTdsRevisedSheet(null); return; }
   if(currentGroup === 'individuals') openSheet(null);
   else if(currentGroup === 'audits'){
     if(currentSubTab === 'intake') openIntakeSheet(null);
@@ -1678,6 +2047,18 @@ function subscribeToLiveUpdates(){
       loadNotices();
     })
     .subscribe();
+  supabaseClient
+    .channel('tds_revised_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tds_revised_returns' }, () => { loadTdsRevised(); })
+    .subscribe();
+  supabaseClient
+    .channel('custom_works_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'custom_works' }, () => { loadCustomWorks(); })
+    .subscribe();
+  supabaseClient
+    .channel('app_settings_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, () => { loadLayout(); })
+    .subscribe();
 }
 
 renderTopTabs();
@@ -1693,6 +2074,9 @@ if(isConfigured){
   loadRoc();
   loadSpecialWorks();
   loadNotices();
+  loadTdsRevised();
+  loadCustomWorks();
+  loadLayout();
   subscribeToLiveUpdates();
 } else {
   showConfigWarning();
